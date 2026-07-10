@@ -1,0 +1,159 @@
+<?php
+// ----- NASTAVENÍ (zůstávají stejná) -----
+$scale_ip = '192.168.1.164';
+$scale_port = 10001;
+$scale_command = "MSV?;\r\n";
+
+// Logika
+$poll_interval_sec = 1;
+$stability_time_sec = 20;
+$stability_margin_kg = 50;
+$min_weight_kg = 500;
+$min_weight_reset_kg = 400; // Toto je klíč pro "nulovou váhu"
+
+// DB (PostgreSQL)
+$db_host = 'localhost';
+$db_port = '5432';
+$db_name = 'vaha';
+$db_user = 'vaha'; // <-- Zkontrolujte
+$db_pass = 'eJzZX5nuc@9RqUXSX';               // <-- Zkontrolujte
+
+// Soubor pro živá data
+$live_weight_file = '/var/www/vaha/live_weight.txt';
+
+// ---------------------
+
+// DB Připojení (PDO pro PostgreSQL) - beze změny
+try {
+    $dsn = "pgsql:host=$db_host;port=$db_port;dbname=$db_name";
+    $pdo = new PDO($dsn, $db_user, $db_pass);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    die("DB Chyba: " . $e->getMessage());
+}
+
+// Funkce pro zápis do DB - beze změny
+function saveWeight($pdo, $weight) {
+    $sql = "INSERT INTO weighings (weight, timestamp) VALUES (?, DEFAULT)";
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$weight]);
+        echo "Uloženo: $weight kg\n";
+    } catch (PDOException $e) {
+        echo "DB Chyba při uložení: " . $e->getMessage() . "\n";
+    }
+}
+
+// Funkce getWeightFromScale() - beze změny
+function getWeightFromScale($socket, $command) {
+    socket_write($socket, $command, strlen($command));
+    $response = socket_read($socket, 1024);
+    
+    if ($response === false) {
+        return null;
+    }
+
+    $parts = explode(',', trim($response));
+    if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
+        return (float)trim($parts[0]);
+    }
+    return null;
+}
+
+
+// =================================================================
+// ----- Hlavní smyčka démona (NOVÁ VERZE S LOGIKOU STAVŮ) -----
+// =================================================================
+
+$current_state = 'IDLE'; // Možné stavy: 'IDLE', 'WEIGHING', 'LOCKED'
+$last_stable_weight = 0;
+$stable_counter = 0;
+
+while (true) {
+    $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+    if ($socket === false) {
+        echo "Nelze vytvořit socket\n";
+        sleep(5);
+        continue;
+    }
+
+    $conn = socket_connect($socket, $scale_ip, $scale_port);
+    if ($conn === false) {
+        echo "Nelze se připojit k váze $scale_ip:$scale_port\n";
+        socket_close($socket);
+        sleep(5);
+        continue;
+    }
+
+    echo "Připojeno k váze. Stav: $current_state\n";
+
+    // Smyčka dokud drží spojení
+    while (true) {
+        $weight = getWeightFromScale($socket, $scale_command);
+
+        if ($weight === null) {
+            echo "Ztráta spojení nebo chyba dat. Rekonektuji...\n";
+            socket_close($socket);
+            sleep($poll_interval_sec);
+            break; // Vypadne z vnitřní smyčky a zkusí se připojit znovu
+        }
+
+        // 1. Vždy uložíme živou váhu do souboru pro web
+        file_put_contents($live_weight_file, $weight);
+
+        // 2. Řízení logiky podle stavů
+        switch ($current_state) {
+            
+            // STAV 1: Čekání na auto
+            case 'IDLE':
+                if ($weight >= $min_weight_kg) {
+                    echo "Detekováno vážení, startuji... ($weight kg)\n";
+                    $current_state = 'WEIGHING';
+                    $stable_counter = 0;
+                    $last_stable_weight = $weight;
+                }
+                break;
+
+            // STAV 2: Vážení (čekání na stabilitu)
+            case 'WEIGHING':
+                // Scénář A: Auto odjelo dřív, než se ustálilo
+                if ($weight < $min_weight_reset_kg) {
+                    echo "Auto odjelo (neuloženo), resetuji.\n";
+                    $current_state = 'IDLE';
+                    break;
+                }
+
+                // Scénář B: Kontrola stability
+                if (abs($weight - $last_stable_weight) <= $stability_margin_kg) {
+                    $stable_counter++;
+                    echo "Váha stabilní... $stable_counter/$stability_time_sec ($weight kg)\n";
+                } else {
+                    // Váha se pohnula, resetujeme časovač
+                    echo "Váha se pohnula, resetuji časovač. ($weight kg)\n";
+                    $stable_counter = 0;
+                    $last_stable_weight = $weight;
+                }
+
+                // Scénář C: Dosaženo stability -> Uložit a ZAMKNOUT
+                if ($stable_counter >= $stability_time_sec) {
+                    saveWeight($pdo, $weight);
+                    $current_state = 'LOCKED'; // <-- DŮLEŽITÁ ZMĚNA
+                }
+                break;
+
+            // STAV 3: Uloženo (čekání na odjezd auta)
+            case 'LOCKED':
+                echo "Stav 'Uloženo'. Čekám na odjezd... ($weight kg)\n";
+                // Jakmile váha klesne pod resetovací limit, vrátíme se do stavu IDLE
+                if ($weight < $min_weight_reset_kg) {
+                    echo "Auto odjelo, systém připraven pro další vážení.\n";
+                    $current_state = 'IDLE';
+                }
+                // Dokud je auto na váze, nic dalšího se neděje
+                break;
+        }
+
+        sleep($poll_interval_sec);
+    }
+}
+?>
