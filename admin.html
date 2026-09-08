@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administrace - Vážní systém</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; color: #3c4043; }
+        h1 { margin-top: 0; }
+        h2 { border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; }
+
+        .card {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-width: 480px;
+            margin: 60px auto;
+        }
+
+        label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 4px; margin-top: 12px; }
+        input[type="text"], input[type="password"], select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+        }
+        textarea { min-height: 60px; resize: vertical; }
+
+        .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+        .checkbox-row label { margin: 0; }
+
+        button {
+            padding: 10px 16px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        button:hover { background: #1558b3; }
+        button.secondary { background: #5f6368; }
+        button.secondary:hover { background: #444648; }
+        button.danger { background: #d93025; }
+        button.danger:hover { background: #a52714; }
+
+        .error { color: #d93025; margin-top: 10px; }
+        .hint { color: #5f6368; font-size: 0.8rem; margin-top: 4px; }
+
+        #admin-view { display: none; max-width: 1100px; margin: 0 auto; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tabs button { background: #e8eaed; color: #3c4043; }
+        .tabs button.active { background: #1a73e8; color: #fff; }
+
+        .panel { display: none; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .panel.active { display: block; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { padding: 8px 10px; border-bottom: 1px solid #ddd; text-align: left; font-size: 0.9rem; }
+        th { background: #f9f9f9; }
+        td.actions { white-space: nowrap; }
+        td.actions button { padding: 4px 10px; font-size: 0.8rem; margin-right: 4px; }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+        .form-grid .full { grid-column: 1 / -1; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; }
+        .badge.yes { background: #e6f4ea; color: #137333; }
+        .badge.no { background: #fce8e6; color: #a50e0e; }
+
+        pre.sync-log {
+            background: #202124;
+            color: #e8eaed;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            max-height: 200px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ----- Přihlášení ----- -->
+    <div class="card" id="login-view">
+        <h1>Administrace</h1>
+        <label for="login-password">Heslo</label>
+        <input type="password" id="login-password" autofocus>
+        <div id="login-error" class="error"></div>
+        <div style="margin-top: 16px;">
+            <button id="login-button">Přihlásit se</button>
+        </div>
+    </div>
+
+    <!-- ----- Administrace ----- -->
+    <div id="admin-view">
+        <div class="topbar">
+            <h1>Administrace vážního systému</h1>
+            <div>
+                <a href="index.html">Zpět na dashboard</a>
+                &nbsp;&nbsp;
+                <button class="secondary" id="logout-button">Odhlásit</button>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="cameras">Kamery</button>
+            <button class="tab-button" data-tab="templates">Šablony kamer</button>
+        </div>
+
+        <!-- Kamery -->
+        <div class="panel active" id="panel-cameras">
+            <h2>Kamery</h2>
+            <table id="cameras-table">
+                <thead>
+                    <tr>
+                        <th>Jméno</th>
+                        <th>Šablona</th>
+                        <th>IP adresa</th>
+                        <th>Aktivní</th>
+                        <th>Dashboard</th>
+                        <th>Foto při vážení</th>
+                        <th>LPR</th>
+                        <th>Akce</th>
+                    </tr>
+                </thead>
+                <tbody id="cameras-body">
+                    <tr><td colspan="8">Načítání...</td></tr>
+                </tbody>
+            </table>
+            <button id="add-camera-button">+ Přidat kameru</button>
+            <button class="secondary" id="sync-now-button">Synchronizovat s MediaMTX</button>
+
+            <div id="camera-form-wrap" style="display:none; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
+                <h2 id="camera-form-title">Nová kamera</h2>
+                <form id="camera-form">
+                    <input type="hidden" id="camera-id">
+                    <div class="form-grid">
+                        <div>
+                            <label for="camera-name">Jméno kamery</label>
+                            <input type="text" id="camera-name" required>
+                        </div>
+                        <div>
+                            <label for="camera-template">Šablona (výrobce)</label>
+                            <select id="camera-template" required></select>
+                        </div>
+                        <div>
+                            <label for="camera-ip">IP adresa</label>
+                            <input type="text" id="camera-ip" placeholder="192.168.93.227" required>
+                        </div>
+                        <div>
+                            <label for="camera-username">Uživatel</label>
+                            <input type="text" id="camera-username" required>
+                        </div>
+                        <div class="full">
+                            <label for="camera-password">Heslo</label>
+                            <input type="password" id="camera-password">
+                            <div class="hint" id="camera-password-hint"></div>
+                        </div>
+                        <div class="full">
+                            <div class="checkbox-row"><input type="checkbox" id="camera-active" checked><label for="camera-active">Aktivní (vytvoří/udrží stream v MediaMTX)</label></div>
+                            <div class="checkbox-row"><input type="checkbox" id="camera-dashboard"><label for="camera-dashboard">Zobrazit na dashboardu</label></div>
+                            <div class="checkbox-row"><input type="checkbox" id="camera-weighing-photo"><label for="camera-weighing-photo">Použít pro foto při vážení</label></div>
+                            <div class="checkbox-row"><input type="checkbox" id="camera-lpr"><label for="camera-lpr">Kamera pro rozpoznání SPZ (LPR)</label></div>
+                        </div>
+                    </div>
+                    <div id="camera-form-error" class="error"></div>
+                    <div style="margin-top: 16px;">
+                        <button type="submit">Uložit</button>
+                        <button type="button" class="secondary" id="camera-form-cancel">Zrušit</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="camera-sync-log-wrap" style="display:none; margin-top: 16px;">
+                <div class="hint">Výsledek synchronizace s MediaMTX:</div>
+                <pre class="sync-log" id="camera-sync-log"></pre>
+            </div>
+        </div>
+
+        <!-- Šablony -->
+        <div class="panel" id="panel-templates">
+            <h2>Šablony kamer</h2>
+            <p class="hint">
+                Šablona definuje vzor RTSP URL pro danou značku kamery. Placeholdery
+                <code>{ip_address}</code>, <code>{username}</code>, <code>{password}</code> se při
+                synchronizaci nahradí hodnotami z konkrétní kamery, např.
+                <code>rtsp://{username}:{password}@{ip_address}/stream1</code>.
+            </p>
+            <table id="templates-table">
+                <thead>
+                    <tr>
+                        <th>Výrobce</th>
+                        <th>Šablona URL</th>
+                        <th>Poznámka</th>
+                        <th>Akce</th>
+                    </tr>
+                </thead>
+                <tbody id="templates-body">
+                    <tr><td colspan="4">Načítání...</td></tr>
+                </tbody>
+            </table>
+            <button id="add-template-button">+ Přidat šablonu</button>
+
+            <div id="template-form-wrap" style="display:none; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
+                <h2 id="template-form-title">Nová šablona</h2>
+                <form id="template-form">
+                    <input type="hidden" id="template-id">
+                    <label for="template-brand">Výrobce</label>
+                    <input type="text" id="template-brand" placeholder="Dahua, Hikvision, ..." required>
+                    <label for="template-url">Šablona URL</label>
+                    <input type="text" id="template-url" placeholder="rtsp://{username}:{password}@{ip_address}/stream1" required>
+                    <label for="template-notes">Poznámka</label>
+                    <textarea id="template-notes"></textarea>
+                    <div id="template-form-error" class="error"></div>
+                    <div style="margin-top: 16px;">
+                        <button type="submit">Uložit</button>
+                        <button type="button" class="secondary" id="template-form-cancel">Zrušit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ----- Pomocná funkce pro volání admin_api.php -----
+        async function api(action, payload) {
+            const response = await fetch(`admin_api.php?action=${encodeURIComponent(action)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload || {}),
+            });
+            const data = await response.json();
+            if (response.status === 401) {
+                showLogin();
+            }
+            return { status: response.status, data };
+        }
+
+        // ----- Přihlášení -----
+        const loginView = document.getElementById('login-view');
+        const adminView = document.getElementById('admin-view');
+        const loginPassword = document.getElementById('login-password');
+        const loginError = document.getElementById('login-error');
+
+        function showLogin() {
+            adminView.style.display = 'none';
+            loginView.style.display = 'block';
+        }
+
+        function showAdmin() {
+            loginView.style.display = 'none';
+            adminView.style.display = 'block';
+            loadTemplates().then(loadCameras);
+        }
+
+        document.getElementById('login-button').addEventListener('click', doLogin);
+        loginPassword.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+        async function doLogin() {
+            loginError.textContent = '';
+            const { data } = await api('login', { password: loginPassword.value });
+            if (data.ok) {
+                loginPassword.value = '';
+                showAdmin();
+            } else {
+                loginError.textContent = data.error || 'Přihlášení selhalo';
+            }
+        }
+
+        document.getElementById('logout-button').addEventListener('click', async () => {
+            await api('logout');
+            showLogin();
+        });
+
+        // ----- Taby -----
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+            });
+        });
+
+        // ----- Šablony kamer -----
+        let templatesCache = [];
+
+        async function loadTemplates() {
+            const { data } = await api('list_templates');
+            if (!data.ok) return;
+            templatesCache = data.items;
+
+            const body = document.getElementById('templates-body');
+            body.innerHTML = '';
+            if (templatesCache.length === 0) {
+                body.innerHTML = '<tr><td colspan="4">Žádné šablony</td></tr>';
+            }
+            templatesCache.forEach(t => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(t.brand_name)}</td>
+                    <td><code>${escapeHtml(t.url_template)}</code></td>
+                    <td>${escapeHtml(t.notes || '')}</td>
+                    <td class="actions">
+                        <button data-edit-template="${t.id}">Upravit</button>
+                        <button class="danger" data-delete-template="${t.id}">Smazat</button>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+
+            const select = document.getElementById('camera-template');
+            select.innerHTML = templatesCache.map(t => `<option value="${t.id}">${escapeHtml(t.brand_name)}</option>`).join('');
+
+            body.querySelectorAll('[data-edit-template]').forEach(btn => {
+                btn.addEventListener('click', () => openTemplateForm(btn.dataset.editTemplate));
+            });
+            body.querySelectorAll('[data-delete-template]').forEach(btn => {
+                btn.addEventListener('click', () => deleteTemplate(btn.dataset.deleteTemplate));
+            });
+        }
+
+        const templateFormWrap = document.getElementById('template-form-wrap');
+        const templateForm = document.getElementById('template-form');
+        const templateFormError = document.getElementById('template-form-error');
+
+        document.getElementById('add-template-button').addEventListener('click', () => openTemplateForm(null));
+        document.getElementById('template-form-cancel').addEventListener('click', () => templateFormWrap.style.display = 'none');
+
+        function openTemplateForm(id) {
+            templateFormError.textContent = '';
+            const t = templatesCache.find(x => String(x.id) === String(id));
+            document.getElementById('template-form-title').textContent = t ? 'Upravit šablonu' : 'Nová šablona';
+            document.getElementById('template-id').value = t ? t.id : '';
+            document.getElementById('template-brand').value = t ? t.brand_name : '';
+            document.getElementById('template-url').value = t ? t.url_template : '';
+            document.getElementById('template-notes').value = t ? (t.notes || '') : '';
+            templateFormWrap.style.display = 'block';
+        }
+
+        templateForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            templateFormError.textContent = '';
+            const payload = {
+                id: document.getElementById('template-id').value || null,
+                brand_name: document.getElementById('template-brand').value,
+                url_template: document.getElementById('template-url').value,
+                notes: document.getElementById('template-notes').value,
+            };
+            const { data } = await api('save_template', payload);
+            if (!data.ok) {
+                templateFormError.textContent = data.error || 'Uložení selhalo';
+                return;
+            }
+            templateFormWrap.style.display = 'none';
+            await loadTemplates();
+        });
+
+        async function deleteTemplate(id) {
+            if (!confirm('Smazat tuto šablonu?')) return;
+            const { data } = await api('delete_template', { id });
+            if (!data.ok) {
+                alert(data.error || 'Smazání selhalo');
+                return;
+            }
+            await loadTemplates();
+        }
+
+        // ----- Kamery -----
+        let camerasCache = [];
+
+        function yesNoBadge(value) {
+            return value ? '<span class="badge yes">ano</span>' : '<span class="badge no">ne</span>';
+        }
+
+        async function loadCameras() {
+            const { data } = await api('list_cameras');
+            if (!data.ok) return;
+            camerasCache = data.items;
+
+            const body = document.getElementById('cameras-body');
+            body.innerHTML = '';
+            if (camerasCache.length === 0) {
+                body.innerHTML = '<tr><td colspan="8">Žádné kamery</td></tr>';
+            }
+            camerasCache.forEach(c => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(c.name)}</td>
+                    <td>${escapeHtml(c.brand_name || '-')}</td>
+                    <td>${escapeHtml(c.ip_address)}</td>
+                    <td>${yesNoBadge(c.is_active)}</td>
+                    <td>${yesNoBadge(c.show_on_dashboard)}</td>
+                    <td>${yesNoBadge(c.is_weighing_photo)}</td>
+                    <td>${yesNoBadge(c.is_lpr)}</td>
+                    <td class="actions">
+                        <button data-edit-camera="${c.id}">Upravit</button>
+                        <button class="danger" data-delete-camera="${c.id}">Smazat</button>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+
+            body.querySelectorAll('[data-edit-camera]').forEach(btn => {
+                btn.addEventListener('click', () => openCameraForm(btn.dataset.editCamera));
+            });
+            body.querySelectorAll('[data-delete-camera]').forEach(btn => {
+                btn.addEventListener('click', () => deleteCamera(btn.dataset.deleteCamera));
+            });
+        }
+
+        const cameraFormWrap = document.getElementById('camera-form-wrap');
+        const cameraForm = document.getElementById('camera-form');
+        const cameraFormError = document.getElementById('camera-form-error');
+        const cameraSyncLogWrap = document.getElementById('camera-sync-log-wrap');
+        const cameraSyncLog = document.getElementById('camera-sync-log');
+
+        document.getElementById('add-camera-button').addEventListener('click', () => openCameraForm(null));
+        document.getElementById('camera-form-cancel').addEventListener('click', () => cameraFormWrap.style.display = 'none');
+
+        function openCameraForm(id) {
+            cameraFormError.textContent = '';
+            cameraSyncLogWrap.style.display = 'none';
+            const c = camerasCache.find(x => String(x.id) === String(id));
+
+            document.getElementById('camera-form-title').textContent = c ? 'Upravit kameru' : 'Nová kamera';
+            document.getElementById('camera-id').value = c ? c.id : '';
+            document.getElementById('camera-name').value = c ? c.name : '';
+            document.getElementById('camera-template').value = c ? c.template_id : (templatesCache[0] ? templatesCache[0].id : '');
+            document.getElementById('camera-ip').value = c ? c.ip_address : '';
+            document.getElementById('camera-username').value = c ? c.username : '';
+            document.getElementById('camera-password').value = '';
+            document.getElementById('camera-password-hint').textContent = c
+                ? 'Ponech prázdné, pokud heslo neměníš.'
+                : 'Povinné u nové kamery.';
+            document.getElementById('camera-active').checked = c ? !!c.is_active : true;
+            document.getElementById('camera-dashboard').checked = c ? !!c.show_on_dashboard : false;
+            document.getElementById('camera-weighing-photo').checked = c ? !!c.is_weighing_photo : false;
+            document.getElementById('camera-lpr').checked = c ? !!c.is_lpr : false;
+
+            cameraFormWrap.style.display = 'block';
+        }
+
+        cameraForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            cameraFormError.textContent = '';
+            cameraSyncLogWrap.style.display = 'none';
+
+            const payload = {
+                id: document.getElementById('camera-id').value || null,
+                name: document.getElementById('camera-name').value,
+                template_id: document.getElementById('camera-template').value,
+                ip_address: document.getElementById('camera-ip').value,
+                username: document.getElementById('camera-username').value,
+                password: document.getElementById('camera-password').value,
+                is_active: document.getElementById('camera-active').checked,
+                show_on_dashboard: document.getElementById('camera-dashboard').checked,
+                is_weighing_photo: document.getElementById('camera-weighing-photo').checked,
+                is_lpr: document.getElementById('camera-lpr').checked,
+            };
+
+            const { data } = await api('save_camera', payload);
+            if (!data.ok) {
+                cameraFormError.textContent = data.error || 'Uložení selhalo';
+                return;
+            }
+            cameraFormWrap.style.display = 'none';
+            showSyncLog(data.sync_log);
+            await loadCameras();
+        });
+
+        async function deleteCamera(id) {
+            if (!confirm('Smazat tuto kameru? Smaže se i odpovídající stream v MediaMTX.')) return;
+            const { data } = await api('delete_camera', { id });
+            if (!data.ok) {
+                alert(data.error || 'Smazání selhalo');
+                return;
+            }
+            showSyncLog(data.sync_log);
+            await loadCameras();
+        }
+
+        document.getElementById('sync-now-button').addEventListener('click', async () => {
+            const { data } = await api('sync_now');
+            if (data.ok) showSyncLog(data.sync_log);
+        });
+
+        function showSyncLog(lines) {
+            if (!lines || lines.length === 0) return;
+            cameraSyncLog.textContent = lines.join('\n');
+            cameraSyncLogWrap.style.display = 'block';
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str ?? '';
+            return div.innerHTML;
+        }
+
+        // ----- Start: zjistit, jestli je uživatel už přihlášený -----
+        (async () => {
+            const { data } = await api('check');
+            if (data.ok) {
+                showAdmin();
+            } else {
+                showLogin();
+            }
+        })();
+    </script>
+
+</body>
+</html>

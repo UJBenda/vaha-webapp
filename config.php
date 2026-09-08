@@ -31,4 +31,8 @@ return [
     // MediaMTX Control API (api: yes v mediamtx.yml). Musí zůstat dostupné
     // jen lokálně (127.0.0.1) - nemá vlastní autentizaci.
     'mediamtx_api' => vahaEnv('VAHA_MEDIAMTX_API', 'http://127.0.0.1:9997'),
+
+    // Heslo pro přihlášení do admin.html (jedno sdílené heslo, žádné
+    // uživatelské účty). Musí být nastaveno v prostředí, viz VAHA_DB_PASS výše.
+    'admin_password' => vahaEnv('VAHA_ADMIN_PASSWORD'),
 ];
