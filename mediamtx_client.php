@@ -12,6 +12,11 @@ function mediamtxRequest(string $method, string $path, ?array $body = null): arr
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 5);
 
+    if (!empty($config['mediamtx_api_user'])) {
+        curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        curl_setopt($ch, CURLOPT_USERPWD, $config['mediamtx_api_user'] . ':' . $config['mediamtx_api_pass']);
+    }
+
     if ($body !== null) {
         curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));

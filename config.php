@@ -29,8 +29,14 @@ return [
         'pass' => vahaEnv('VAHA_DB_PASS'),
     ],
     // MediaMTX Control API (api: yes v mediamtx.yml). Musí zůstat dostupné
-    // jen lokálně (127.0.0.1) - nemá vlastní autentizaci.
+    // jen lokálně (127.0.0.1). Přes docker publikování portu mediamtx často
+    // nevidí spojení jako z localhostu (vidí IP docker bridge), takže
+    // výchozí "bez hesla z 127.0.0.1" výjimka v mediamtx.yml nefunguje -
+    // proto vlastní uživatel/heslo pro "api"/"metrics"/"pprof" akce
+    // (authInternalUsers v mediamtx.yml). Prázdné = bez auth (starší setup).
     'mediamtx_api' => vahaEnv('VAHA_MEDIAMTX_API', 'http://127.0.0.1:9997'),
+    'mediamtx_api_user' => vahaEnv('VAHA_MEDIAMTX_API_USER', ''),
+    'mediamtx_api_pass' => vahaEnv('VAHA_MEDIAMTX_API_PASS', ''),
 
     // Heslo pro přihlášení do admin.html (jedno sdílené heslo, žádné
     // uživatelské účty). Musí být nastaveno v prostředí, viz VAHA_DB_PASS výše.
