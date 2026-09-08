@@ -24,33 +24,46 @@
         .video-grid {
             flex: 2;
             min-width: 500px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            align-content: flex-start;
-        }
-
-        .video {
-            flex: 1 1 100%;
-            min-width: 300px;
             background-color: #000;
             border-radius: 8px;
-            overflow: hidden;
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+            padding: 5px;
+            box-sizing: border-box;
+            display: grid;
+            gap: 5px;
+        }
+        /* Rozložení podle počtu zobrazených kamer (1-4) */
+        .video-grid.count-1 { grid-template-columns: 1fr; }
+        .video-grid.count-2 { grid-template-columns: 1fr 1fr; }
+        .video-grid.count-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+        .video-grid.count-3 .video:first-child { grid-column: span 2; }
+        .video-grid.count-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+        .video {
+            position: relative;
+            background-color: #111;
+            border-radius: 4px;
+            overflow: hidden;
         }
 
         .video video {
             display: block;
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
             border: none;
         }
 
         .video-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
             color: #fff;
             font-size: 0.85rem;
-            padding: 6px 10px;
+            padding: 4px 10px;
             background: rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+            z-index: 1;
         }
 
         #live-weight-display {
@@ -200,11 +213,12 @@
                         <th>Datum</th>
                         <th>Čas</th>
                         <th>Váha (kg)</th>
+                        <th>SPZ</th>
                         <th>Foto</th>
                     </tr>
                 </thead>
                 <tbody id="history-body">
-                    <tr><td colspan="4">Načítání...</td></tr>
+                    <tr><td colspan="5">Načítání...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -273,7 +287,7 @@
                 historyBodyEl.innerHTML = ''; // Vyčistit tabulku
                 
                 if (data.length === 0) {
-                     historyBodyEl.innerHTML = '<tr><td colspan="4">Žádná data (nebo nevyhovují filtru)</td></tr>';
+                     historyBodyEl.innerHTML = '<tr><td colspan="5">Žádná data (nebo nevyhovují filtru)</td></tr>';
                      return;
                 }
                 
@@ -298,13 +312,14 @@
                         <td>${formattedDate}</td>
                         <td>${formattedTime}</td>
                         <td>${parseFloat(row.weight).toFixed(2)}</td>
+                        <td>${row.spz || '-'}</td>
                         <td>${row.photo_path ? '📷 Zobrazit' : 'Ne'}</td>
                     `;
                     historyBodyEl.appendChild(tr);
                 });
             } catch (error) {
                 console.error('Chyba při načítání historie:', error);
-                historyBodyEl.innerHTML = '<tr><td colspan="4">Chyba načítání</td></tr>';
+                historyBodyEl.innerHTML = '<tr><td colspan="5">Chyba načítání</td></tr>';
             }
         }
         
@@ -344,6 +359,7 @@
                 const cameras = await response.json();
 
                 container.innerHTML = '';
+                container.className = 'video-grid count-' + Math.min(Math.max(cameras.length, 1), 4);
 
                 if (cameras.length === 0) {
                     container.innerHTML = '<div class="video"><div class="video-label">Žádná kamera není nastavena k zobrazení</div></div>';

@@ -82,6 +82,37 @@
             max-height: 200px;
             overflow: auto;
         }
+
+        #test-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        #test-modal .modal-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        #test-modal .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        #test-modal img { max-width: 100%; border-radius: 4px; }
+        #test-modal pre { background: #202124; color: #e8eaed; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
+
+        .settings-table td:last-child { max-width: 320px; }
     </style>
 </head>
 <body>
@@ -111,6 +142,7 @@
         <div class="tabs">
             <button class="tab-button active" data-tab="cameras">Kamery</button>
             <button class="tab-button" data-tab="templates">Šablony kamer</button>
+            <button class="tab-button" data-tab="settings">Nastavení váhy</button>
         </div>
 
         <!-- Kamery -->
@@ -183,6 +215,28 @@
             </div>
         </div>
 
+        <!-- Nastavení váhy -->
+        <div class="panel" id="panel-settings">
+            <h2>Nastavení váhy a démona</h2>
+            <p class="hint">
+                Změny se projeví, až weighing_daemon.php znovu naváže spojení s váhou
+                (při dalším restartu služby nebo výpadku spojení).
+            </p>
+            <table class="settings-table" id="settings-table">
+                <thead>
+                    <tr>
+                        <th>Parametr</th>
+                        <th>Hodnota</th>
+                    </tr>
+                </thead>
+                <tbody id="settings-body">
+                    <tr><td colspan="2">Načítání...</td></tr>
+                </tbody>
+            </table>
+            <div id="settings-error" class="error"></div>
+            <button id="save-settings-button">Uložit nastavení</button>
+        </div>
+
         <!-- Šablony -->
         <div class="panel" id="panel-templates">
             <h2>Šablony kamer</h2>
@@ -227,6 +281,16 @@
         </div>
     </div>
 
+    <div id="test-modal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 style="margin:0;">Test kamery</h3>
+                <button class="secondary" id="test-modal-close">Zavřít</button>
+            </div>
+            <div id="test-modal-content"></div>
+        </div>
+    </div>
+
     <script>
         // ----- Pomocná funkce pro volání admin_api.php -----
         async function api(action, payload) {
@@ -257,6 +321,7 @@
             loginView.style.display = 'none';
             adminView.style.display = 'block';
             loadTemplates().then(loadCameras);
+            loadSettings();
         }
 
         document.getElementById('login-button').addEventListener('click', doLogin);
@@ -400,6 +465,7 @@
                     <td>${yesNoBadge(c.is_weighing_photo)}</td>
                     <td>${yesNoBadge(c.is_lpr)}</td>
                     <td class="actions">
+                        <button data-test-camera="${c.id}">Test</button>
                         <button data-edit-camera="${c.id}">Upravit</button>
                         <button class="danger" data-delete-camera="${c.id}">Smazat</button>
                     </td>
@@ -407,12 +473,38 @@
                 body.appendChild(tr);
             });
 
+            body.querySelectorAll('[data-test-camera]').forEach(btn => {
+                btn.addEventListener('click', () => testCamera(btn.dataset.testCamera));
+            });
             body.querySelectorAll('[data-edit-camera]').forEach(btn => {
                 btn.addEventListener('click', () => openCameraForm(btn.dataset.editCamera));
             });
             body.querySelectorAll('[data-delete-camera]').forEach(btn => {
                 btn.addEventListener('click', () => deleteCamera(btn.dataset.deleteCamera));
             });
+        }
+
+        // ----- Test kamery (živý snímek přes FFmpeg) -----
+        const testModal = document.getElementById('test-modal');
+        const testModalContent = document.getElementById('test-modal-content');
+
+        document.getElementById('test-modal-close').addEventListener('click', () => {
+            testModal.style.display = 'none';
+        });
+
+        async function testCamera(id) {
+            testModal.style.display = 'flex';
+            testModalContent.innerHTML = '<p>⏳ Připojuji se ke kameře a stahuji snímek... (může to trvat až 5 s)</p>';
+
+            const { data } = await api('test_camera', { id });
+            if (data.ok) {
+                testModalContent.innerHTML = `<img src="${data.image}" alt="Snímek z kamery">`;
+            } else {
+                testModalContent.innerHTML = `
+                    <p class="error">${escapeHtml(data.error || 'Test selhal')}</p>
+                    ${data.log ? `<pre>${escapeHtml(data.log)}</pre>` : ''}
+                `;
+            }
         }
 
         const cameraFormWrap = document.getElementById('camera-form-wrap');
@@ -502,6 +594,43 @@
             div.textContent = str ?? '';
             return div.innerHTML;
         }
+
+        // ----- Nastavení váhy (app_settings) -----
+        async function loadSettings() {
+            const { data } = await api('list_settings');
+            if (!data.ok) return;
+
+            const body = document.getElementById('settings-body');
+            body.innerHTML = '';
+            data.items.forEach(s => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>
+                        <strong>${escapeHtml(s.description || s.setting_key)}</strong><br>
+                        <span class="hint">${escapeHtml(s.setting_key)}</span>
+                    </td>
+                    <td><input type="text" data-setting-key="${escapeHtml(s.setting_key)}" value="${escapeHtml(s.setting_value)}"></td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        document.getElementById('save-settings-button').addEventListener('click', async () => {
+            const settingsError = document.getElementById('settings-error');
+            settingsError.textContent = '';
+
+            const settings = {};
+            document.querySelectorAll('[data-setting-key]').forEach(input => {
+                settings[input.dataset.settingKey] = input.value;
+            });
+
+            const { data } = await api('save_settings', { settings });
+            if (!data.ok) {
+                settingsError.textContent = data.error || 'Uložení selhalo';
+                return;
+            }
+            await loadSettings();
+        });
 
         // ----- Start: zjistit, jestli je uživatel už přihlášený -----
         (async () => {

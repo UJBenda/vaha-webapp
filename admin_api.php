@@ -166,6 +166,83 @@ switch ($action) {
         respond(['ok' => true]);
     }
 
+    // Vyfotí aktuální snímek z kamery přes FFmpeg a vrátí ho jako base64
+    // (bez ukládání na disk) - pro rychlé ověření přihlašovacích údajů/URL.
+    case 'test_camera': {
+        $id = $input['id'] ?? null;
+        if (!$id) {
+            respond(['ok' => false, 'error' => 'Chybí id'], 400);
+        }
+
+        $stmt = $pdo->prepare("SELECT c.ip_address, c.username, c.password, t.url_template
+                                FROM cameras c JOIN camera_templates t ON t.id = c.template_id
+                                WHERE c.id = ?");
+        $stmt->execute([$id]);
+        $camera = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$camera) {
+            respond(['ok' => false, 'error' => 'Kamera nenalezena'], 404);
+        }
+
+        $rtspUrl = resolveCameraSource($camera);
+        $tempImage = sys_get_temp_dir() . '/vaha_cam_test_' . $id . '_' . time() . '.jpg';
+        $tlsVerifyFlag = str_starts_with($rtspUrl, 'rtsps://') ? '-tls_verify 0 ' : '';
+
+        $command = sprintf(
+            'ffmpeg -rtsp_transport tcp %s-i %s -vframes 1 -q:v 2 -t 5 %s 2>&1',
+            $tlsVerifyFlag,
+            escapeshellarg($rtspUrl),
+            escapeshellarg($tempImage)
+        );
+
+        $output = [];
+        $returnVar = -1;
+        exec($command, $output, $returnVar);
+
+        if ($returnVar === 0 && file_exists($tempImage) && filesize($tempImage) > 0) {
+            $base64 = 'data:image/jpeg;base64,' . base64_encode(file_get_contents($tempImage));
+            @unlink($tempImage);
+            respond(['ok' => true, 'image' => $base64]);
+        }
+
+        @unlink($tempImage);
+        respond(['ok' => false, 'error' => 'FFmpeg selhal', 'log' => implode("\n", $output)], 502);
+    }
+
+    // app_settings - obecný key/value editor. Standardní klíče pro
+    // weighing_daemon.php se založí s výchozími hodnotami, pokud v DB
+    // ještě nejsou (aby se admin dal použít bez ruční SQL přípravy).
+    case 'list_settings': {
+        $defaults = [
+            'poll_interval_sec' => ['1', 'Jak často (v sekundách) se čte váha z terminálu'],
+            'stability_time_sec' => ['20', 'Kolik sekund musí být váha stabilní, než se uloží'],
+            'stability_margin_kg' => ['50', 'Tolerance kolísání váhy (kg), která se ještě počítá jako "stabilní"'],
+            'min_weight_kg' => ['500', 'Od jaké váhy (kg) se považuje, že najelo vozidlo'],
+            'min_weight_reset_kg' => ['400', 'Pod jakou váhou (kg) se považuje, že vozidlo odjelo'],
+        ];
+        $existing = $pdo->query('SELECT setting_key FROM app_settings')->fetchAll(PDO::FETCH_COLUMN);
+        $insert = $pdo->prepare('INSERT INTO app_settings (setting_key, setting_value, description) VALUES (?, ?, ?)');
+        foreach ($defaults as $key => [$value, $description]) {
+            if (!in_array($key, $existing, true)) {
+                $insert->execute([$key, $value, $description]);
+            }
+        }
+
+        $items = $pdo->query('SELECT * FROM app_settings ORDER BY setting_key')->fetchAll(PDO::FETCH_ASSOC);
+        respond(['ok' => true, 'items' => $items]);
+    }
+
+    case 'save_settings': {
+        $settings = $input['settings'] ?? null;
+        if (!is_array($settings)) {
+            respond(['ok' => false, 'error' => 'Chybí settings'], 400);
+        }
+        $update = $pdo->prepare('UPDATE app_settings SET setting_value = ? WHERE setting_key = ?');
+        foreach ($settings as $key => $value) {
+            $update->execute([(string)$value, (string)$key]);
+        }
+        respond(['ok' => true]);
+    }
+
     default:
         respond(['ok' => false, 'error' => 'Neznámá akce'], 400);
 }
