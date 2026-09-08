@@ -14,8 +14,7 @@ try {
 
     // Základní dotaz
     // Vybíráme i ID (pro budoucí použití) a photo_path
-    $sql = "SELECT id, weight, timestamp, photo_path FROM weighings";
-
+    $sql = "SELECT id, weight, timestamp, photo_path, spz FROM weighings";
     // Zpracování filtrů
     $where_clauses = [];
     $parameters = [];
