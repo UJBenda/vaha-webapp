@@ -2,11 +2,12 @@
 // Sdílená logika pro práci s kamerami: sestavení RTSP zdrojové URL ze
 // šablony a synchronizace tabulky "cameras" s MediaMTX Control API.
 //
-// Cesty spravované touto appkou v MediaMTX mají vždy prefix "cam" + id
-// kamery (např. "cam3"), aby se nikdy nesáhlo na ručně nastavené paths
-// z mediamtx.yml (třeba "kamera", "kamera2"). Frontend i weighing_daemon.php
-// vždy dostávají jméno path od appky (get_cameras.php / DB), nikdy si ho
-// samy neodvozují - takže tahle konvence je jediné místo, které o ní ví.
+// Tabulka "cameras" je jediný zdroj pravdy pro to, co má v MediaMTX běžet -
+// syncCameras() smaže úplně KAŽDÝ path, který v MediaMTX existuje, ale
+// neodpovídá žádné aktivní kameře v DB (typicky staré ručně přidané cesty
+// z mediamtx.yml). Cesty spravované touto appkou mají vždy jméno "cam" + id
+// kamery (např. "cam3"). Frontend i weighing_daemon.php vždy dostávají
+// jméno path od appky (get_cameras.php / DB), nikdy si ho samy neodvozují.
 //
 // camera_templates.url_template podporuje dvě sady placeholderů (kvůli
 // starším šablonám zadaným ručně): {ip_address}/{username}/{password}
@@ -51,9 +52,9 @@ function syncCameras(PDO $pdo): array {
     }
 
     foreach (mediamtxListPathNames() as $name) {
-        if (preg_match('/^cam\d+$/', $name) && !isset($desiredPathNames[$name])) {
+        if (!isset($desiredPathNames[$name])) {
             mediamtxDeletePath($name);
-            $log[] = "Smazáno: $name (kamera už není aktivní)";
+            $log[] = "Smazáno: $name (není mezi aktivními kamerami v DB)";
         }
     }
 
