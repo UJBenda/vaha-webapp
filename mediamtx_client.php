@@ -30,13 +30,30 @@ function mediamtxRequest(string $method, string $path, ?array $body = null): arr
     return ['code' => $httpCode, 'body' => $response, 'error' => $error];
 }
 
-// Vytvoří path, pokud neexistuje, jinak ho upraví (upsert).
-function mediamtxUpsertPath(string $name, string $source): array {
-    $add = mediamtxRequest('POST', "/v3/config/paths/add/$name", ['source' => $source]);
-    if ($add['code'] >= 200 && $add['code'] < 300) {
-        return $add;
+// Vrací aktuální nastavení path, nebo null pokud neexistuje.
+function mediamtxGetPath(string $name): ?array {
+    $res = mediamtxRequest('GET', "/v3/config/paths/get/$name");
+    if ($res['code'] !== 200 || $res['body'] === false) {
+        return null;
     }
-    // Path už existuje (nebo jiná chyba) -> zkusíme patch.
+    return json_decode($res['body'], true);
+}
+
+// Vytvoří path, pokud neexistuje. Pokud existuje se stejným source, nedělá
+// nic - PATCH donutí MediaMTX path reloadnout (a tím shodit právě běžící
+// RTSP spojení i WHEP session), takže ho posíláme jen když se source fakt
+// změnil, ne při každé synchronizaci.
+function mediamtxUpsertPath(string $name, string $source): array {
+    $existing = mediamtxGetPath($name);
+
+    if ($existing === null) {
+        return mediamtxRequest('POST', "/v3/config/paths/add/$name", ['source' => $source]);
+    }
+
+    if (($existing['source'] ?? null) === $source) {
+        return ['code' => 200, 'body' => json_encode(['unchanged' => true]), 'error' => ''];
+    }
+
     return mediamtxRequest('PATCH', "/v3/config/paths/patch/$name", ['source' => $source]);
 }
 
