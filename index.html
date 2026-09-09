@@ -324,7 +324,10 @@
         }
         
         // 3. Funkce pro spuštění WebRTC streamu pro jednu kameru (WHEP)
-        const WHEP_BASE = 'https://kamera.micharnaubusinek.cz';
+        // Prázdné = stejná doména jako appka (vaha.micharnaubusinek.cz), proxovaná
+        // přes Apache do MediaMTX - viz WHEP proxy blok ve vaha.conf. Díky tomu
+        // je to same-origin request a prohlížeč nepotřebuje CORS hlavičky.
+        const WHEP_BASE = '';
 
         async function startStream(pathName, videoEl) {
             const pc = new RTCPeerConnection();
