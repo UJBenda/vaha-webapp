@@ -141,8 +141,10 @@ function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
     }
 }
 
-// Funkce getWeightFromScale() - beze změny
-function getWeightFromScale($socket, $command) {
+// Funkce getWeightFromScale() - $rawOut (nepovinné, reference) dostane
+// syrovou odpověď z váhy přesně tak, jak přišla (kvůli scale_relay.php,
+// který ji přeposílá dál dodavatelskému SW).
+function getWeightFromScale($socket, $command, ?string &$rawOut = null) {
     socket_write($socket, $command, strlen($command));
     $response = socket_read($socket, 1024);
 
@@ -150,7 +152,9 @@ function getWeightFromScale($socket, $command) {
         return null;
     }
 
-    $parts = explode(',', trim($response));
+    $rawOut = trim($response);
+
+    $parts = explode(',', $rawOut);
     if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
         return (float)trim($parts[0]);
     }

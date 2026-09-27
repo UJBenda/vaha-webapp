@@ -51,4 +51,15 @@ return [
 
     // Cesta k read_spz.py pro rozpoznání SPZ (LPR).
     'read_spz_script' => vahaEnv('VAHA_READ_SPZ_SCRIPT', __DIR__ . '/read_spz.py'),
+
+    // Soubor se syrovou (neparsovanou) poslední odpovědí z váhy - zapisuje
+    // weighing_daemon.php, čte scale_relay.php (viz níže).
+    'scale_raw_file' => vahaEnv('VAHA_SCALE_RAW_FILE', '/var/www/vaha/scale_raw.txt'),
+
+    // Port, na kterém scale_relay.php naslouchá pro druhý (nezávislý) SW,
+    // co potřebuje číst váhu stejným protokolem, ale fyzický převodník
+    // (Papouch GNOME232 apod.) umí jen jedno TCP spojení najednou. Místo
+    // dotazu na skutečnou váhu relay odpoví poslední hodnotou z
+    // scale_raw_file - žádné druhé spojení k převodníku není potřeba.
+    'scale_relay_port' => (int)vahaEnv('VAHA_SCALE_RELAY_PORT', '10002'),
 ];

@@ -65,7 +65,7 @@ while (true) {
     echo "Připojeno k váze. Stav: $current_state\n";
 
     while (true) {
-        $weight = getWeightFromScale($socket, $scale_command);
+        $weight = getWeightFromScale($socket, $scale_command, $rawResponse);
 
         if ($weight === null) {
             echo "Ztráta spojení nebo chyba dat. Rekonektuji...\n";
@@ -75,6 +75,9 @@ while (true) {
         }
 
         file_put_contents($config['live_weight_file'], $weight);
+        if ($rawResponse !== null) {
+            file_put_contents($config['scale_raw_file'], $rawResponse);
+        }
 
         switch ($current_state) {
 
