@@ -62,4 +62,15 @@ return [
     // dotazu na skutečnou váhu relay odpoví poslední hodnotou z
     // scale_raw_file - žádné druhé spojení k převodníku není potřeba.
     'scale_relay_port' => (int)vahaEnv('VAHA_SCALE_RELAY_PORT', '10002'),
+
+    // Soubor "příznak" pro ruční tlačítko u váhy - force_save.php ho
+    // vytvoří, weighing_daemon.php ho při každém cyklu kontroluje a pokud
+    // existuje, uloží aktuální váhu okamžitě (bez čekání na automatickou
+    // stabilizaci) a soubor smaže.
+    'force_save_flag' => vahaEnv('VAHA_FORCE_SAVE_FLAG', '/var/www/vaha/force_save.flag'),
+
+    // Token v URL pro force_save.php - endpoint nemá přihlášení (volá ho
+    // fyzické tlačítko/IoT relé, ne prohlížeč), takže ho chrání token +
+    // IP omezení v Apache (stejné jako zbytek webu).
+    'force_save_token' => vahaEnv('VAHA_FORCE_SAVE_TOKEN'),
 ];

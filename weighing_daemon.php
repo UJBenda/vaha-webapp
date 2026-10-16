@@ -79,6 +79,23 @@ while (true) {
             file_put_contents($config['scale_raw_file'], $rawResponse);
         }
 
+        // Ruční tlačítko u váhy (force_save.php) - uložit okamžitě, bez
+        // ohledu na stav automatiky, a nečekat na stabilizaci.
+        if (file_exists($config['force_save_flag'])) {
+            @unlink($config['force_save_flag']);
+            echo "Ruční tlačítko - vynucuji uložení ($weight kg)\n";
+
+            $weighingId = saveWeight($pdo, $weight);
+            if ($weighingId !== null) {
+                captureWeighingPhotos($pdo, $weighingId, $config);
+            }
+
+            $current_state = 'LOCKED';
+            $stable_counter = 0;
+            sleep($poll_interval_sec);
+            continue;
+        }
+
         switch ($current_state) {
 
             case 'IDLE':
