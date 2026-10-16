@@ -1,13 +1,41 @@
 <?php
 // Sdílené nastavení pro všechny PHP skripty appky.
 // Citlivé hodnoty (hlavně DB heslo) se NEUKLÁDAJÍ do gitu - berou se
-// z proměnných prostředí. Na serveru je potřeba je nastavit, např.:
-//   Apache (vaha.conf, do <VirtualHost>):
-//     SetEnv VAHA_DB_PASS "heslo"
-//   cron (pro sync_cameras.php):
-//     VAHA_DB_PASS=heslo
-//     * * * * * php /var/www/vaha/sync_cameras.php >> /var/log/vaha-sync-cameras.log 2>&1
-//   systemd EnvironmentFile pro weighing_daemon.php.
+// z proměnných prostředí. Jediný zdroj pravdy je soubor /etc/vaha/vaha.env
+// (mimo git repozitář, mimo webroot) - viz vaha.env.example pro formát a
+// README k nasazení. Apache, systemd (vaha.service) i cron (sync_cameras.php)
+// spouští stejné PHP soubory, takže stačí jeden soubor s hesly místo
+// duplikování SetEnv / Environment= / inline proměnných na třech místech.
+//
+// Pokud už je proměnná nastavená jinak (např. starší Environment= v
+// systemd unitu), má přednost před souborem - viz vahaLoadEnvFile().
+
+function vahaLoadEnvFile(string $path): void {
+    if (!is_readable($path)) {
+        return;
+    }
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $key = trim($key);
+        $value = trim($value);
+        $len = strlen($value);
+        if ($len >= 2 && (
+            ($value[0] === '"' && $value[$len - 1] === '"') ||
+            ($value[0] === "'" && $value[$len - 1] === "'")
+        )) {
+            $value = substr($value, 1, -1);
+        }
+        if (getenv($key) === false) {
+            putenv("$key=$value");
+        }
+    }
+}
+
+vahaLoadEnvFile('/etc/vaha/vaha.env');
 
 function vahaEnv(string $name, ?string $default = null): string {
     $value = getenv($name);
