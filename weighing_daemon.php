@@ -37,6 +37,8 @@ try {
 $current_state = 'IDLE';
 $last_stable_weight = 0;
 $stable_counter = 0;
+$sessionReadings = [];    // čtení z probíhajícího vážení, dokud nemá weighing_id
+$activeWeighingId = null; // weighing_id, jakmile je vážení uložené (fáze LOCKED)
 
 while (true) {
     // Nastavení se znovu načtou při každém (re)connectu k váze.
@@ -85,11 +87,21 @@ while (true) {
             @unlink($config['force_save_flag']);
             echo "Ruční tlačítko - vynucuji uložení ($weight kg)\n";
 
+            $sessionReadings[] = [
+                'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+                'weight' => $weight,
+                'is_stable' => false,
+                'is_button_press' => true,
+            ];
+
             $weighingId = saveWeight($pdo, $weight);
             if ($weighingId !== null) {
+                saveWeighingReadings($pdo, $weighingId, $sessionReadings);
                 captureWeighingPhotos($pdo, $weighingId, $config);
             }
 
+            $sessionReadings = [];
+            $activeWeighingId = $weighingId;
             $current_state = 'LOCKED';
             $stable_counter = 0;
             sleep($poll_interval_sec);
@@ -104,6 +116,12 @@ while (true) {
                     $current_state = 'WEIGHING';
                     $stable_counter = 0;
                     $last_stable_weight = $weight;
+                    $sessionReadings = [[
+                        'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+                        'weight' => $weight,
+                        'is_stable' => false,
+                        'is_button_press' => false,
+                    ]];
                 }
                 break;
 
@@ -111,10 +129,12 @@ while (true) {
                 if ($weight < $min_weight_reset_kg) {
                     echo "Auto odjelo (neuloženo), resetuji.\n";
                     $current_state = 'IDLE';
+                    $sessionReadings = [];
                     break;
                 }
 
-                if (abs($weight - $last_stable_weight) <= $stability_margin_kg) {
+                $isStableTick = abs($weight - $last_stable_weight) <= $stability_margin_kg;
+                if ($isStableTick) {
                     $stable_counter++;
                     echo "Váha stabilní... $stable_counter/$stability_time_sec ($weight kg)\n";
                 } else {
@@ -123,21 +143,35 @@ while (true) {
                     $last_stable_weight = $weight;
                 }
 
+                $sessionReadings[] = [
+                    'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+                    'weight' => $weight,
+                    'is_stable' => $isStableTick,
+                    'is_button_press' => false,
+                ];
+
                 if ($stable_counter >= $stability_time_sec) {
                     $weighingId = saveWeight($pdo, $weight);
                     if ($weighingId !== null) {
+                        saveWeighingReadings($pdo, $weighingId, $sessionReadings);
                         captureWeighingPhotos($pdo, $weighingId, $config);
                     }
 
+                    $sessionReadings = [];
+                    $activeWeighingId = $weighingId;
                     $current_state = 'LOCKED';
                 }
                 break;
 
             case 'LOCKED':
                 echo "Stav 'Uloženo'. Čekám na odjezd... ($weight kg)\n";
+                if ($activeWeighingId !== null) {
+                    insertWeighingReading($pdo, $activeWeighingId, $weight, false, false);
+                }
                 if ($weight < $min_weight_reset_kg) {
                     echo "Auto odjelo, systém připraven pro další vážení.\n";
                     $current_state = 'IDLE';
+                    $activeWeighingId = null;
                 }
                 break;
         }

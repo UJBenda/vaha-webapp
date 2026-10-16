@@ -93,6 +93,48 @@ function saveWeight(PDO $pdo, float $weight): ?int {
     }
 }
 
+// ----- Graf průběhu vážení (weighing_readings) -----
+//
+// Během WEIGHING fáze se jednotlivá čtení drží v paměti (weighing_id ještě
+// neexistuje) a uloží se naráz přes saveWeighingReadings() ve chvíli, kdy se
+// vážení uloží. Během LOCKED fáze (čeká se na odjezd) už weighing_id známe,
+// takže se každé čtení ukládá rovnou přes insertWeighingReading().
+
+// Uloží dávku čtení (pole ['time' => 'Y-m-d H:i:s.u', 'weight' => float,
+// 'is_stable' => bool, 'is_button_press' => bool]) k jednomu vážení.
+function saveWeighingReadings(PDO $pdo, int $weighingId, array $readings): void {
+    if (empty($readings)) {
+        return;
+    }
+    $stmt = $pdo->prepare(
+        'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    foreach ($readings as $reading) {
+        $stmt->execute([
+            $weighingId,
+            $reading['time'],
+            $reading['weight'],
+            (int)$reading['is_stable'],
+            (int)$reading['is_button_press'],
+        ]);
+    }
+}
+
+// Uloží jedno čtení rovnou (weighing_id už existuje).
+function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $isStable, bool $isButtonPress): void {
+    $pdo->prepare(
+        'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
+         VALUES (?, ?, ?, ?, ?)'
+    )->execute([
+        $weighingId,
+        (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+        $weight,
+        (int)$isStable,
+        (int)$isButtonPress,
+    ]);
+}
+
 // ----- Foto + SPZ pro všechny aktivní kamery určené k fotografování při vážení -----
 function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
     $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.is_weighing_photo, c.is_lpr, t.url_template
