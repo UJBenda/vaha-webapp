@@ -126,37 +126,50 @@ function takeStartPhoto(PDO $pdo, array $config): ?array {
 
 // Uloží dávku čtení (pole ['time' => 'Y-m-d H:i:s.u', 'weight' => float,
 // 'is_stable' => bool, 'is_button_press' => bool]) k jednomu vážení.
+// Stejně jako saveWeight() chybu jen zaloguje a nehodí ji dál - záznam pro
+// graf je vedlejší údaj, nesmí kvůli němu spadnout celý démon (a tím pádem
+// i hlavní vážení). Viz incident 16.10.2026: chybějící GRANT na tuto
+// tabulku shodil démon při každém INSERTu, systemd ho pořád dokola
+// restartoval a každý restart vyrobil duplicitní vážení pro stojící auto.
 function saveWeighingReadings(PDO $pdo, int $weighingId, array $readings): void {
     if (empty($readings)) {
         return;
     }
-    $stmt = $pdo->prepare(
-        'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
-         VALUES (?, ?, ?, ?, ?)'
-    );
-    foreach ($readings as $reading) {
-        $stmt->execute([
-            $weighingId,
-            $reading['time'],
-            $reading['weight'],
-            (int)$reading['is_stable'],
-            (int)$reading['is_button_press'],
-        ]);
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        foreach ($readings as $reading) {
+            $stmt->execute([
+                $weighingId,
+                $reading['time'],
+                $reading['weight'],
+                (int)$reading['is_stable'],
+                (int)$reading['is_button_press'],
+            ]);
+        }
+    } catch (PDOException $e) {
+        echo "DB Chyba při ukládání průběhu vážení: " . $e->getMessage() . "\n";
     }
 }
 
 // Uloží jedno čtení rovnou (weighing_id už existuje).
 function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $isStable, bool $isButtonPress): void {
-    $pdo->prepare(
-        'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
-         VALUES (?, ?, ?, ?, ?)'
-    )->execute([
-        $weighingId,
-        (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
-        $weight,
-        (int)$isStable,
-        (int)$isButtonPress,
-    ]);
+    try {
+        $pdo->prepare(
+            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([
+            $weighingId,
+            (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+            $weight,
+            (int)$isStable,
+            (int)$isButtonPress,
+        ]);
+    } catch (PDOException $e) {
+        echo "DB Chyba při ukládání čtení vážení: " . $e->getMessage() . "\n";
+    }
 }
 
 // ----- Foto + SPZ pro všechny aktivní kamery určené k fotografování při vážení -----
