@@ -14,6 +14,16 @@ $settingDefaults = [
     'stability_margin_kg' => 50,
     'min_weight_kg' => 500,
     'min_weight_reset_kg' => 400,
+    // Kolik vteřin čtení před detekcí vozidla (IDLE) se přilepí na začátek
+    // grafu - jinak by graf začínal až na prahu min_weight_kg, ne na
+    // skutečné nástupní hraně.
+    'pre_roll_sec' => 15,
+    // Jak dlouho po poklesu pod min_weight_reset_kg ještě zaznamenávat
+    // čtení (sestupná hrana grafu), než vážení definitivně uzavřeme.
+    'departure_tail_sec' => 15,
+    // Váha, při které považujeme váhu za prázdnou - ukončí odjezd dřív,
+    // nemusí se čekat na departure_tail_sec.
+    'departure_empty_kg' => 50,
 ];
 
 $config = require __DIR__ . '/config.php';
@@ -38,8 +48,10 @@ $current_state = 'IDLE';
 $last_stable_weight = 0;
 $stable_counter = 0;
 $sessionReadings = [];    // čtení z probíhajícího vážení, dokud nemá weighing_id
-$activeWeighingId = null; // weighing_id, jakmile je vážení uložené (fáze LOCKED)
+$activeWeighingId = null; // weighing_id, jakmile je vážení uložené (fáze LOCKED/DEPARTING)
 $startPhoto = null;       // dočasná fotka z počátku vážení (viz takeStartPhoto())
+$preRollBuffer = [];      // posledních pre_roll_sec vteřin čtení během IDLE (nástupní hrana grafu)
+$departureStartedAt = 0;  // unix čas, kdy váha poprvé klesla pod min_weight_reset_kg (fáze DEPARTING)
 
 while (true) {
     // Nastavení se znovu načtou při každém (re)connectu k váze.
@@ -49,6 +61,9 @@ while (true) {
     $stability_margin_kg = $settings['stability_margin_kg'];
     $min_weight_kg = $settings['min_weight_kg'];
     $min_weight_reset_kg = $settings['min_weight_reset_kg'];
+    $pre_roll_sec = $settings['pre_roll_sec'];
+    $departure_tail_sec = $settings['departure_tail_sec'];
+    $departure_empty_kg = $settings['departure_empty_kg'];
 
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
     if ($socket === false) {
@@ -117,17 +132,25 @@ while (true) {
         switch ($current_state) {
 
             case 'IDLE':
+                // Rolling buffer posledních pre_roll_sec vteřin - při detekci
+                // vozidla se přilepí na začátek grafu (nástupní hrana).
+                $preRollBuffer[] = [
+                    'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
+                    'weight' => $weight,
+                    'is_stable' => false,
+                    'is_button_press' => false,
+                ];
+                $preRollMax = max(1, (int)ceil($pre_roll_sec / max(1, $poll_interval_sec)));
+                if (count($preRollBuffer) > $preRollMax) {
+                    array_splice($preRollBuffer, 0, count($preRollBuffer) - $preRollMax);
+                }
+
                 if ($weight >= $min_weight_kg) {
                     echo "Detekováno vážení, startuji... ($weight kg)\n";
                     $current_state = 'WEIGHING';
                     $stable_counter = 0;
                     $last_stable_weight = $weight;
-                    $sessionReadings = [[
-                        'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
-                        'weight' => $weight,
-                        'is_stable' => false,
-                        'is_button_press' => false,
-                    ]];
+                    $sessionReadings = $preRollBuffer; // včetně nástupní hrany před detekcí
                     $startPhoto = takeStartPhoto($pdo, $config);
                     if ($startPhoto !== null) {
                         echo "Dočasná fotka při startu vážení: {$startPhoto['web_path']}\n";
@@ -151,7 +174,9 @@ while (true) {
 
                     $sessionReadings = [];
                     $startPhoto = null;
-                    $current_state = 'IDLE';
+                    $activeWeighingId = $weighingId;
+                    $departureStartedAt = time();
+                    $current_state = 'DEPARTING';
                     break;
                 }
 
@@ -196,9 +221,32 @@ while (true) {
                     insertWeighingReading($pdo, $activeWeighingId, $weight, false, false);
                 }
                 if ($weight < $min_weight_reset_kg) {
-                    echo "Auto odjelo, systém připraven pro další vážení.\n";
+                    echo "Váha klesla pod práh, zaznamenávám sestupnou hranu...\n";
+                    $departureStartedAt = time();
+                    $current_state = 'DEPARTING';
+                }
+                break;
+
+            case 'DEPARTING':
+                // Sestupná hrana grafu - pokračujeme v zápisu čtení ještě
+                // departure_tail_sec vteřin (nebo dokud váha neklesne k
+                // departure_empty_kg), aby graf zachytil celý sjezd z váhy,
+                // ne jen první bod pod prahem.
+                if ($activeWeighingId !== null) {
+                    insertWeighingReading($pdo, $activeWeighingId, $weight, false, false);
+                }
+
+                if ($weight >= $min_weight_reset_kg) {
+                    echo "Váha zase stoupla, prodlužuji čekání na odjezd.\n";
+                    $departureStartedAt = time();
+                    break;
+                }
+
+                if ($weight <= $departure_empty_kg || (time() - $departureStartedAt) >= $departure_tail_sec) {
+                    echo "Odjezd dokončen, systém připraven pro další vážení.\n";
                     $current_state = 'IDLE';
                     $activeWeighingId = null;
+                    $preRollBuffer = [];
                 }
                 break;
         }
