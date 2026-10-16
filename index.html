@@ -169,6 +169,13 @@
         #history-table tbody tr[data-photopath]:hover {
             background-color: #f5f5f5;
         }
+        /* Vážení, které se neustálilo (auto odjelo předčasně) */
+        #history-table tbody tr.unstabilized {
+            background-color: #fce8e6;
+        }
+        #history-table tbody tr.unstabilized:hover {
+            background-color: #fad2cf;
+        }
 
         /* ----- NOVÉ: Filtry ----- */
         .filters {
@@ -392,11 +399,14 @@
                     if (row.photo_path) {
                         tr.dataset.photopath = row.photo_path;
                     }
-                    
+                    if (row.is_stabilized === false) {
+                        tr.classList.add('unstabilized');
+                    }
+
                     tr.innerHTML = `
                         <td>${formattedDate}</td>
                         <td>${formattedTime}</td>
-                        <td>${parseFloat(row.weight).toFixed(2)}</td>
+                        <td>${parseFloat(row.weight).toFixed(2)}${row.is_stabilized === false ? ' ⚠️' : ''}</td>
                         <td>${row.spz || '-'}</td>
                         <td>${row.photo_path ? '📷 Zobrazit' : 'Ne'}</td>
                     `;
@@ -614,6 +624,12 @@
             const rest = document.createElement('span');
             rest.textContent = `${ts.toLocaleDateString('cs-CZ')} ${formatTime(ts)}${w.spz ? ' · SPZ ' + w.spz : ''}`;
             summaryEl.appendChild(rest);
+            if (w.is_stabilized === false) {
+                const warn = document.createElement('span');
+                warn.style.color = '#d93025';
+                warn.textContent = '⚠️ Neustáleno - auto odjelo předčasně';
+                summaryEl.appendChild(warn);
+            }
 
             const points = data.readings.map(r => ({
                 time: parseChartTime(r.t),

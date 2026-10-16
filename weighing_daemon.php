@@ -39,6 +39,7 @@ $last_stable_weight = 0;
 $stable_counter = 0;
 $sessionReadings = [];    // čtení z probíhajícího vážení, dokud nemá weighing_id
 $activeWeighingId = null; // weighing_id, jakmile je vážení uložené (fáze LOCKED)
+$startPhoto = null;       // dočasná fotka z počátku vážení (viz takeStartPhoto())
 
 while (true) {
     // Nastavení se znovu načtou při každém (re)connectu k váze.
@@ -100,6 +101,11 @@ while (true) {
                 captureWeighingPhotos($pdo, $weighingId, $config);
             }
 
+            if ($startPhoto !== null) {
+                @unlink($startPhoto['filesystem_path']);
+                $startPhoto = null;
+            }
+
             $sessionReadings = [];
             $activeWeighingId = $weighingId;
             $current_state = 'LOCKED';
@@ -122,14 +128,30 @@ while (true) {
                         'is_stable' => false,
                         'is_button_press' => false,
                     ]];
+                    $startPhoto = takeStartPhoto($pdo, $config);
+                    if ($startPhoto !== null) {
+                        echo "Dočasná fotka při startu vážení: {$startPhoto['web_path']}\n";
+                    }
                 }
                 break;
 
             case 'WEIGHING':
                 if ($weight < $min_weight_reset_kg) {
-                    echo "Auto odjelo (neuloženo), resetuji.\n";
-                    $current_state = 'IDLE';
+                    $lastWeight = end($sessionReadings)['weight'];
+                    echo "Auto odjelo bez ustálení, ukládám neúplné vážení ($lastWeight kg)\n";
+
+                    $weighingId = saveWeight($pdo, $lastWeight, false);
+                    if ($weighingId !== null) {
+                        saveWeighingReadings($pdo, $weighingId, $sessionReadings);
+                        if ($startPhoto !== null) {
+                            $pdo->prepare('UPDATE weighings SET photo_path = ? WHERE id = ?')
+                                ->execute([$startPhoto['web_path'], $weighingId]);
+                        }
+                    }
+
                     $sessionReadings = [];
+                    $startPhoto = null;
+                    $current_state = 'IDLE';
                     break;
                 }
 
@@ -155,6 +177,11 @@ while (true) {
                     if ($weighingId !== null) {
                         saveWeighingReadings($pdo, $weighingId, $sessionReadings);
                         captureWeighingPhotos($pdo, $weighingId, $config);
+                    }
+
+                    if ($startPhoto !== null) {
+                        @unlink($startPhoto['filesystem_path']);
+                        $startPhoto = null;
                     }
 
                     $sessionReadings = [];

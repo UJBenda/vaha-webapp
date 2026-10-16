@@ -12,7 +12,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     $weighing = $pdo->query(
-        'SELECT id, weight, timestamp, spz, photo_path FROM weighings ORDER BY id DESC LIMIT 1'
+        'SELECT id, weight, timestamp, spz, photo_path, is_stabilized FROM weighings ORDER BY id DESC LIMIT 1'
     )->fetch(PDO::FETCH_ASSOC);
 
     header('Content-Type: application/json');
@@ -45,6 +45,7 @@ try {
             'timestamp' => (new DateTime($weighing['timestamp']))->format('Y-m-d\TH:i:s.v'),
             'spz' => $weighing['spz'],
             'photo_path' => $weighing['photo_path'],
+            'is_stabilized' => ($weighing['is_stabilized'] === 't' || $weighing['is_stabilized'] === true),
         ],
         'readings' => $readings,
     ]);

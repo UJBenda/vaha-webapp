@@ -80,17 +80,41 @@ function readLicensePlate(string $imagePath, string $scriptPath): ?string {
 }
 
 // ----- Uložení vážení do DB, vrací id nového řádku -----
-function saveWeight(PDO $pdo, float $weight): ?int {
+// $isStabilized = false pro vážení, které se neustálilo (auto odjelo
+// předčasně) - viz weighing_daemon.php, ukládá se i tak kvůli fotce a grafu.
+function saveWeight(PDO $pdo, float $weight, bool $isStabilized = true): ?int {
     try {
-        $stmt = $pdo->prepare("INSERT INTO weighings (weight, timestamp) VALUES (?, DEFAULT) RETURNING id");
-        $stmt->execute([$weight]);
+        $stmt = $pdo->prepare("INSERT INTO weighings (weight, timestamp, is_stabilized) VALUES (?, DEFAULT, ?) RETURNING id");
+        $stmt->execute([$weight, (int)$isStabilized]);
         $id = (int)$stmt->fetchColumn();
-        echo "Uloženo: $weight kg (id $id)\n";
+        echo "Uloženo: $weight kg (id $id)" . ($isStabilized ? "" : " [NEUSTÁLENO]") . "\n";
         return $id;
     } catch (PDOException $e) {
         echo "DB Chyba při uložení: " . $e->getMessage() . "\n";
         return null;
     }
+}
+
+// ----- Dočasná fotka na začátku vážení -----
+// Pořídí se hned při detekci vozidla (IDLE -> WEIGHING), ještě než víme, jestli
+// se váha ustálí. Pokud se vážení ustálí normálně, je zbytečná a smaže se
+// (viz weighing_daemon.php). Pokud auto odjede bez ustálení, použije se jako
+// jediný záznam o tom, kdo na váze byl.
+function takeStartPhoto(PDO $pdo, array $config): ?array {
+    $camera = $pdo->query(
+        "SELECT c.ip_address, c.username, c.password, t.url_template
+         FROM cameras c
+         JOIN camera_templates t ON t.id = c.template_id
+         WHERE c.is_active = true AND c.is_weighing_photo = true
+         ORDER BY c.id LIMIT 1"
+    )->fetch(PDO::FETCH_ASSOC);
+
+    if (!$camera) {
+        return null;
+    }
+
+    $rtspUrl = resolveCameraSource($camera);
+    return takeSnapshot($rtspUrl, $config['photo_storage_path'], $config['photo_web_path_prefix']);
 }
 
 // ----- Graf průběhu vážení (weighing_readings) -----

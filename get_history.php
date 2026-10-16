@@ -14,7 +14,7 @@ try {
 
     // Základní dotaz
     // Vybíráme i ID (pro budoucí použití) a photo_path
-    $sql = "SELECT id, weight, timestamp, photo_path, spz FROM weighings";
+    $sql = "SELECT id, weight, timestamp, photo_path, spz, is_stabilized FROM weighings";
     // Zpracování filtrů
     $where_clauses = [];
     $parameters = [];
@@ -53,6 +53,13 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($parameters);
     $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // PDO_PGSQL vrací boolean sloupce jako řetězce 't'/'f', ne jako PHP bool -
+    // bez přetypování by v JS "f" (neprázdný string) vycházelo jako truthy.
+    foreach ($data as &$row) {
+        $row['is_stabilized'] = ($row['is_stabilized'] === 't' || $row['is_stabilized'] === true);
+    }
+    unset($row);
 
     header('Content-Type: application/json');
     echo json_encode($data);
