@@ -18,6 +18,21 @@ function loadSettings(PDO $pdo, array $defaults): array {
     return $settings;
 }
 
+// ----- Přečte aktuální váhu z live_weight_file (stejný soubor, co
+// zobrazuje "Aktuální váha" na dashboardu) - používají force_save.php a
+// driver_save.php pro kontrolu proti min_weight_kg před uložením.
+function getCurrentWeight(array $config): ?float {
+    $raw = @file_get_contents($config['live_weight_file']);
+    if ($raw === false) {
+        return null;
+    }
+    $raw = trim($raw);
+    if ($raw === '' || !is_numeric($raw)) {
+        return null;
+    }
+    return (float)$raw;
+}
+
 // ----- Pořízení snímku z kamery přes FFmpeg -----
 // Vrací ['web_path' => ..., 'filesystem_path' => ...] nebo null při chybě.
 function takeSnapshot(string $rtspUrl, string $storagePath, string $webPrefix): ?array {

@@ -220,8 +220,12 @@ switch ($action) {
             'poll_interval_sec' => ['1', 'Jak často (v sekundách) se čte váha z terminálu'],
             'stability_time_sec' => ['20', 'Kolik sekund musí být váha stabilní, než se uloží'],
             'stability_margin_kg' => ['50', 'Tolerance kolísání váhy (kg), která se ještě počítá jako "stabilní"'],
-            'min_weight_kg' => ['500', 'Od jaké váhy (kg) se považuje, že najelo vozidlo'],
+            'min_weight_kg' => ['500', 'Od jaké váhy (kg) se považuje, že najelo vozidlo (a od které se zamyká tlačítko "Vážení řidič" / ruční tlačítko)'],
             'min_weight_reset_kg' => ['400', 'Pod jakou váhou (kg) se považuje, že vozidlo odjelo'],
+            'pre_roll_sec' => ['15', 'Kolik vteřin čtení před detekcí vozidla zahrnout do grafu (nástupní hrana)'],
+            'departure_tail_sec' => ['15', 'Jak dlouho po poklesu pod min_weight_reset_kg ještě zaznamenávat čtení (sestupná hrana grafu)'],
+            'departure_empty_kg' => ['50', 'Váha (kg), od které se váha považuje za prázdnou (ukončí odjezd dřív, nemusí se čekat na departure_tail_sec)'],
+            'driver_save_cooldown_sec' => ['60', 'Jak dlouho po stisku tlačítka "Vážení řidič" na dashboardu musí uplynout, než jde použít znovu'],
         ];
         $existing = $pdo->query('SELECT setting_key FROM app_settings')->fetchAll(PDO::FETCH_COLUMN);
         $insert = $pdo->prepare('INSERT INTO app_settings (setting_key, setting_value, description) VALUES (?, ?, ?)');

@@ -104,4 +104,9 @@ return [
     // fyzické tlačítko/IoT relé, ne prohlížeč), takže ho chrání token +
     // IP omezení v Apache (stejné jako zbytek webu).
     'force_save_token' => vahaEnv('VAHA_FORCE_SAVE_TOKEN'),
+
+    // Soubor s unix časem posledního přijatého stisku tlačítka "Vážení
+    // řidič" - driver_save.php podle něj hlídá cooldown
+    // (driver_save_cooldown_sec v app_settings).
+    'driver_save_last_file' => vahaEnv('VAHA_DRIVER_SAVE_LAST_FILE', '/var/www/vaha/driver_save_last.txt'),
 ];

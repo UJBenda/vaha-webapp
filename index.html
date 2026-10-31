@@ -175,9 +175,23 @@
             cursor: pointer;
             font-size: 0.9rem;
             white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         #driver-save-button:hover { background: #313f9e; }
         #driver-save-button:disabled { background: #9fa8da; cursor: default; }
+        #driver-save-spinner {
+            display: none;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(255,255,255,0.5);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: driver-save-spin 0.8s linear infinite;
+        }
+        #driver-save-button:disabled #driver-save-spinner { display: inline-block; }
+        @keyframes driver-save-spin { to { transform: rotate(360deg); } }
         #driver-save-status {
             font-size: 0.85rem;
             margin-top: 6px;
@@ -257,7 +271,10 @@
         <div class="weighing">
             <div class="section-header">
                 <h2>Aktuální váha</h2>
-                <button id="driver-save-button">Vážení řidič</button>
+                <button id="driver-save-button">
+                    <span id="driver-save-spinner"></span>
+                    <span id="driver-save-label">Vážení řidič</span>
+                </button>
             </div>
             <div id="live-weight-display">
                 --.-- <small>kg</small>
@@ -488,9 +505,54 @@
 
         // Tlačítko "Vážení řidič" - stejná rutina jako fyzické tlačítko u
         // váhy (force_save.php), jen jiný zdroj (modrá značka v grafu
-        // místo červené) - viz driver_save.php.
+        // místo červené) - viz driver_save.php. Server hlídá cooldown
+        // (driver_save_cooldown_sec) a minimální váhu (min_weight_kg),
+        // tlačítko jen zobrazuje odpočet / chybovou hlášku.
         const driverSaveButton = document.getElementById('driver-save-button');
         const driverSaveStatus = document.getElementById('driver-save-status');
+        const driverSaveLabel = document.getElementById('driver-save-label');
+        let driverSaveCountdownTimer = null;
+
+        function stopDriverSaveCountdown() {
+            if (driverSaveCountdownTimer) {
+                clearInterval(driverSaveCountdownTimer);
+                driverSaveCountdownTimer = null;
+            }
+            driverSaveButton.disabled = false;
+            driverSaveLabel.textContent = 'Vážení řidič';
+        }
+
+        function startDriverSaveCountdown(seconds) {
+            if (driverSaveCountdownTimer) {
+                clearInterval(driverSaveCountdownTimer);
+            }
+            let remaining = Math.ceil(seconds);
+            driverSaveButton.disabled = true;
+            const tick = () => {
+                if (remaining <= 0) {
+                    stopDriverSaveCountdown();
+                    return;
+                }
+                driverSaveLabel.textContent = `Další za ${remaining} s`;
+                remaining--;
+            };
+            tick();
+            driverSaveCountdownTimer = setInterval(tick, 1000);
+        }
+
+        // Při načtení stránky zjistíme, jestli už neběží cooldown z
+        // dřívějška (např. po refresh stránky krátce po stisku).
+        (async () => {
+            try {
+                const response = await fetch('driver_save.php');
+                const data = await response.json();
+                if (data.ok && data.cooldown_remaining_sec > 0) {
+                    startDriverSaveCountdown(data.cooldown_remaining_sec);
+                }
+            } catch (error) {
+                console.error('Chyba při zjišťování stavu tlačítka Vážení řidič:', error);
+            }
+        })();
 
         driverSaveButton.addEventListener('click', async () => {
             driverSaveButton.disabled = true;
@@ -500,10 +562,16 @@
                 const response = await fetch('driver_save.php', { method: 'POST' });
                 const data = await response.json();
                 if (!response.ok || !data.ok) {
+                    if (data.cooldown_remaining_sec > 0) {
+                        startDriverSaveCountdown(data.cooldown_remaining_sec);
+                    } else {
+                        driverSaveButton.disabled = false;
+                    }
                     throw new Error(data.error || 'Chyba serveru');
                 }
                 driverSaveStatus.textContent = '✓ Vážení uloženo';
                 driverSaveStatus.className = 'ok';
+                startDriverSaveCountdown(data.cooldown_remaining_sec);
                 // Démon zpracuje příznak až při nejbližším cyklu (viz
                 // poll_interval_sec) - krátké zpoždění, ať je co zobrazit.
                 setTimeout(() => {
@@ -512,14 +580,13 @@
                 }, 1500);
             } catch (error) {
                 console.error('Chyba při ukládání vážení řidič:', error);
-                driverSaveStatus.textContent = '✗ Nepodařilo se uložit: ' + error.message;
+                driverSaveStatus.textContent = '✗ ' + error.message;
                 driverSaveStatus.className = 'error';
             } finally {
                 setTimeout(() => {
-                    driverSaveButton.disabled = false;
                     driverSaveStatus.textContent = '';
                     driverSaveStatus.className = '';
-                }, 3000);
+                }, 4000);
             }
         });
 
