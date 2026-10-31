@@ -199,7 +199,15 @@
                             <div class="checkbox-row"><input type="checkbox" id="camera-active" checked><label for="camera-active">Aktivní (vytvoří/udrží stream v MediaMTX)</label></div>
                             <div class="checkbox-row"><input type="checkbox" id="camera-dashboard"><label for="camera-dashboard">Zobrazit na dashboardu</label></div>
                             <div class="checkbox-row"><input type="checkbox" id="camera-weighing-photo"><label for="camera-weighing-photo">Použít pro foto při vážení</label></div>
-                            <div class="checkbox-row"><input type="checkbox" id="camera-lpr"><label for="camera-lpr">Kamera pro rozpoznání SPZ (LPR)</label></div>
+                        </div>
+                        <div class="full">
+                            <label for="camera-lpr-mode">Rozpoznávání SPZ</label>
+                            <select id="camera-lpr-mode">
+                                <option value="off">Nepoužívat</option>
+                                <option value="ocr">SPZ (OCR)</option>
+                                <option value="qr">QR kód na vozidle</option>
+                                <option value="both">QR kód, při selhání SPZ (OCR)</option>
+                            </select>
                         </div>
                     </div>
                     <div id="camera-form-error" class="error"></div>
@@ -445,6 +453,14 @@
             return value ? '<span class="badge yes">ano</span>' : '<span class="badge no">ne</span>';
         }
 
+        const LPR_MODE_LABELS = { off: 'nepoužívat', ocr: 'SPZ (OCR)', qr: 'QR kód', both: 'QR kód + SPZ' };
+        function lprModeBadge(mode) {
+            if (!mode || mode === 'off') {
+                return '<span class="badge no">nepoužívá se</span>';
+            }
+            return `<span class="badge yes">${escapeHtml(LPR_MODE_LABELS[mode] || mode)}</span>`;
+        }
+
         async function loadCameras() {
             const { data } = await api('list_cameras');
             if (!data.ok) return;
@@ -464,7 +480,7 @@
                     <td>${yesNoBadge(c.is_active)}</td>
                     <td>${yesNoBadge(c.show_on_dashboard)}</td>
                     <td>${yesNoBadge(c.is_weighing_photo)}</td>
-                    <td>${yesNoBadge(c.is_lpr)}</td>
+                    <td>${lprModeBadge(c.lpr_mode)}</td>
                     <td class="actions">
                         <button data-test-camera="${c.id}">Test</button>
                         <button data-edit-camera="${c.id}">Upravit</button>
@@ -535,7 +551,7 @@
             document.getElementById('camera-active').checked = c ? !!c.is_active : true;
             document.getElementById('camera-dashboard').checked = c ? !!c.show_on_dashboard : false;
             document.getElementById('camera-weighing-photo').checked = c ? !!c.is_weighing_photo : false;
-            document.getElementById('camera-lpr').checked = c ? !!c.is_lpr : false;
+            document.getElementById('camera-lpr-mode').value = c ? (c.lpr_mode || 'off') : 'off';
 
             cameraFormWrap.style.display = 'block';
         }
@@ -555,7 +571,7 @@
                 is_active: document.getElementById('camera-active').checked,
                 show_on_dashboard: document.getElementById('camera-dashboard').checked,
                 is_weighing_photo: document.getElementById('camera-weighing-photo').checked,
-                is_lpr: document.getElementById('camera-lpr').checked,
+                lpr_mode: document.getElementById('camera-lpr-mode').value,
             };
 
             const { data } = await api('save_camera', payload);

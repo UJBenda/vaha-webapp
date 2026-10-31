@@ -11,7 +11,7 @@ try {
     $pdo = new PDO($dsn, $db['user'], $db['pass']);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $sql = "SELECT id, name, is_lpr
+    $sql = "SELECT id, name, lpr_mode
             FROM cameras
             WHERE is_active = true AND show_on_dashboard = true
             ORDER BY id";
@@ -22,7 +22,7 @@ try {
             'id' => (int)$row['id'],
             'name' => $row['name'],
             'path' => 'cam' . $row['id'],
-            'is_lpr' => (bool)$row['is_lpr'],
+            'lpr_mode' => $row['lpr_mode'],
         ];
     }, $rows);
 

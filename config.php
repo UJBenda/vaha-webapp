@@ -77,8 +77,11 @@ return [
     // Soubor, do kterého weighing_daemon.php zapisuje aktuální váhu pro web.
     'live_weight_file' => vahaEnv('VAHA_LIVE_WEIGHT_FILE', '/var/www/vaha/live_weight.txt'),
 
-    // Cesta k read_spz.py pro rozpoznání SPZ (LPR).
+    // Cesta k read_spz.py pro rozpoznání SPZ přes OCR (EasyOCR).
     'read_spz_script' => vahaEnv('VAHA_READ_SPZ_SCRIPT', __DIR__ . '/read_spz.py'),
+
+    // Cesta k read_qr.py pro rozpoznání SPZ přes QR kód nalepený na vozidle.
+    'read_qr_script' => vahaEnv('VAHA_READ_QR_SCRIPT', __DIR__ . '/read_qr.py'),
 
     // Soubor se syrovou (neparsovanou) poslední odpovědí z váhy - zapisuje
     // weighing_daemon.php, čte scale_relay.php (viz níže).

@@ -62,8 +62,12 @@ function takeSnapshot(string $rtspUrl, string $storagePath, string $webPrefix): 
     return null;
 }
 
-// ----- Rozpoznání SPZ přes read_spz.py (EasyOCR) -----
-function readLicensePlate(string $imagePath, string $scriptPath): ?string {
+// ----- Rozpoznání SPZ -----
+// Podle lpr_mode kamery buď přes QR kód na vozidle (rychlé, spolehlivé -
+// viz read_qr.py, hledá payload ve tvaru "SPZ:xxxxxxx"), přes OCR
+// (EasyOCR - viz read_spz.py), nebo "both" - nejdřív QR, a pokud auto
+// nemá/nejde přečíst nálepku, spadne zpět na OCR.
+function runRecognitionScript(string $imagePath, string $scriptPath): ?string {
     $command = sprintf('python3 %s %s 2>&1', escapeshellarg($scriptPath), escapeshellarg($imagePath));
     $output = [];
     $returnVar = -1;
@@ -72,11 +76,27 @@ function readLicensePlate(string $imagePath, string $scriptPath): ?string {
     $firstLine = trim($output[0] ?? '');
     if ($returnVar !== 0 || $firstLine === '' || $firstLine === 'NENALEZENO_DLE_FILTRU' || str_starts_with($firstLine, 'CHYBA')) {
         if ($returnVar !== 0) {
-            echo "read_spz.py selhal (kód $returnVar): " . implode(' | ', $output) . "\n";
+            echo "Skript $scriptPath selhal (kód $returnVar): " . implode(' | ', $output) . "\n";
         }
         return null;
     }
     return $firstLine;
+}
+
+function readLicensePlate(string $imagePath, array $config, string $lprMode): ?string {
+    if ($lprMode === 'qr' || $lprMode === 'both') {
+        $spz = runRecognitionScript($imagePath, $config['read_qr_script']);
+        if ($spz !== null) {
+            return $spz;
+        }
+        if ($lprMode === 'qr') {
+            return null;
+        }
+    }
+    if ($lprMode === 'ocr' || $lprMode === 'both') {
+        return runRecognitionScript($imagePath, $config['read_spz_script']);
+    }
+    return null;
 }
 
 // ----- Uložení vážení do DB, vrací id nového řádku -----
@@ -177,10 +197,10 @@ function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $i
 
 // ----- Foto + SPZ pro všechny aktivní kamery určené k fotografování při vážení -----
 function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
-    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.is_weighing_photo, c.is_lpr, t.url_template
+    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.is_weighing_photo, c.lpr_mode, t.url_template
             FROM cameras c
             JOIN camera_templates t ON t.id = c.template_id
-            WHERE c.is_active = true AND (c.is_weighing_photo = true OR c.is_lpr = true)
+            WHERE c.is_active = true AND (c.is_weighing_photo = true OR c.lpr_mode != 'off')
             ORDER BY c.id";
     $cameras = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -211,13 +231,13 @@ function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
             $primaryPhotoSet = true;
         }
 
-        if ($camera['is_lpr']) {
-            $spz = readLicensePlate($snapshot['filesystem_path'], $config['read_spz_script']);
+        if ($camera['lpr_mode'] !== 'off') {
+            $spz = readLicensePlate($snapshot['filesystem_path'], $config, $camera['lpr_mode']);
             if ($spz !== null) {
                 $pdo->prepare('UPDATE weighings SET spz = ? WHERE id = ?')->execute([$spz, $weighingId]);
-                echo "SPZ rozpoznána (kamera '{$camera['name']}'): $spz\n";
+                echo "SPZ rozpoznána (kamera '{$camera['name']}', režim '{$camera['lpr_mode']}'): $spz\n";
             } else {
-                echo "SPZ se z kamery '{$camera['name']}' nepodařilo rozpoznat.\n";
+                echo "SPZ se z kamery '{$camera['name']}' nepodařilo rozpoznat (režim '{$camera['lpr_mode']}').\n";
             }
         }
     }

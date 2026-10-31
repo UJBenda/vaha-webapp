@@ -78,8 +78,12 @@ switch ($action) {
         // string a Postgres to u sloupce typu boolean odmítne.
         $isActive = (int)!empty($input['is_active']);
         $isWeighingPhoto = (int)!empty($input['is_weighing_photo']);
-        $isLpr = (int)!empty($input['is_lpr']);
         $showOnDashboard = (int)!empty($input['show_on_dashboard']);
+
+        $lprMode = (string)($input['lpr_mode'] ?? 'off');
+        if (!in_array($lprMode, ['off', 'ocr', 'qr', 'both'], true)) {
+            $lprMode = 'off';
+        }
 
         if ($name === '' || $ip === '' || $username === '' || empty($templateId)) {
             respond(['ok' => false, 'error' => 'Chybí povinné pole (jméno, šablona, IP, uživatel)'], 400);
@@ -93,21 +97,21 @@ switch ($action) {
                 $password = (string)$stmt->fetchColumn();
             }
             $sql = "UPDATE cameras SET name=?, template_id=?, ip_address=?, username=?, password=?,
-                    is_active=?, is_weighing_photo=?, is_lpr=?, show_on_dashboard=? WHERE id=?";
+                    is_active=?, is_weighing_photo=?, lpr_mode=?, show_on_dashboard=? WHERE id=?";
             $pdo->prepare($sql)->execute([
                 $name, $templateId, $ip, $username, $password,
-                $isActive, $isWeighingPhoto, $isLpr, $showOnDashboard, $id,
+                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard, $id,
             ]);
         } else {
             if ($password === '') {
                 respond(['ok' => false, 'error' => 'Heslo je povinné u nové kamery'], 400);
             }
             $sql = "INSERT INTO cameras (name, template_id, ip_address, username, password,
-                    is_active, is_weighing_photo, is_lpr, show_on_dashboard)
+                    is_active, is_weighing_photo, lpr_mode, show_on_dashboard)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
             $pdo->prepare($sql)->execute([
                 $name, $templateId, $ip, $username, $password,
-                $isActive, $isWeighingPhoto, $isLpr, $showOnDashboard,
+                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard,
             ]);
         }
 
