@@ -21,7 +21,7 @@ if ($token === '' || !hash_equals($config['force_save_token'], $token)) {
     exit;
 }
 
-if (@touch($config['force_save_flag']) === false) {
+if (@file_put_contents($config['force_save_flag'], 'physical') === false) {
     http_response_code(500);
     echo json_encode(['ok' => false, 'error' => 'Nelze vytvořit příznak - zkontroluj oprávnění k souboru']);
     exit;

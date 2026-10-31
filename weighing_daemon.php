@@ -97,17 +97,23 @@ while (true) {
             file_put_contents($config['scale_raw_file'], $rawResponse);
         }
 
-        // Ruční tlačítko u váhy (force_save.php) - uložit okamžitě, bez
-        // ohledu na stav automatiky, a nečekat na stabilizaci.
+        // Ruční tlačítko u váhy (force_save.php) nebo tlačítko "Vážení
+        // řidič" na dashboardu (driver_save.php) - uložit okamžitě, bez
+        // ohledu na stav automatiky, a nečekat na stabilizaci. Obsah
+        // příznaku rozlišuje zdroj (pro barvu značky v grafu) - prázdný
+        // obsah (starší touch()) bereme jako fyzické tlačítko.
         if (file_exists($config['force_save_flag'])) {
+            $pressSource = trim((string)@file_get_contents($config['force_save_flag']));
             @unlink($config['force_save_flag']);
-            echo "Ruční tlačítko - vynucuji uložení ($weight kg)\n";
+            $isDriverPress = ($pressSource === 'driver');
+            echo ($isDriverPress ? "Tlačítko 'Vážení řidič'" : "Ruční tlačítko") . " - vynucuji uložení ($weight kg)\n";
 
             $sessionReadings[] = [
                 'time' => (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
                 'weight' => $weight,
                 'is_stable' => false,
-                'is_button_press' => true,
+                'is_button_press' => !$isDriverPress,
+                'is_driver_press' => $isDriverPress,
             ];
 
             $weighingId = saveWeight($pdo, $weight);

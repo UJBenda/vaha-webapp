@@ -123,6 +123,7 @@
         }
         .weighing-chart-legend .swatch.stable { background: #0ca30c; }
         .weighing-chart-legend .swatch.button { background: #d93025; }
+        .weighing-chart-legend .swatch.driver { background: #3f51b5; }
         #weighing-chart-svg {
             width: 100%;
             height: 180px;
@@ -152,6 +153,38 @@
             padding-bottom: 10px;
             color: #3c4043;
         }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 10px;
+        }
+        .section-header h2 {
+            border-bottom: none;
+            padding-bottom: 0;
+            margin: 0;
+        }
+        #driver-save-button {
+            padding: 10px 16px;
+            background: #3f51b5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+        #driver-save-button:hover { background: #313f9e; }
+        #driver-save-button:disabled { background: #9fa8da; cursor: default; }
+        #driver-save-status {
+            font-size: 0.85rem;
+            margin-top: 6px;
+            min-height: 1.2em;
+        }
+        #driver-save-status.ok { color: #0ca30c; }
+        #driver-save-status.error { color: #d93025; }
         #history-table {
             width: 100%;
             border-collapse: collapse;
@@ -222,10 +255,14 @@
     <div class="container">
 
         <div class="weighing">
-            <h2>Aktuální váha</h2>
+            <div class="section-header">
+                <h2>Aktuální váha</h2>
+                <button id="driver-save-button">Vážení řidič</button>
+            </div>
             <div id="live-weight-display">
                 --.-- <small>kg</small>
             </div>
+            <div id="driver-save-status"></div>
 
             <h2>Historie vážení</h2>
             
@@ -276,6 +313,7 @@
                 <div class="weighing-chart-legend">
                     <span><i class="swatch stable"></i>Stabilní úsek</span>
                     <span><i class="swatch button"></i>Ruční tlačítko</span>
+                    <span><i class="swatch driver"></i>Vážení řidič</span>
                 </div>
                 <div style="position: relative;">
                     <svg id="weighing-chart-svg"></svg>
@@ -445,6 +483,43 @@
             const tr = e.target.closest('tr');
             if (tr && tr.dataset.id) {
                 window.location.href = 'weighing_detail.html?id=' + encodeURIComponent(tr.dataset.id);
+            }
+        });
+
+        // Tlačítko "Vážení řidič" - stejná rutina jako fyzické tlačítko u
+        // váhy (force_save.php), jen jiný zdroj (modrá značka v grafu
+        // místo červené) - viz driver_save.php.
+        const driverSaveButton = document.getElementById('driver-save-button');
+        const driverSaveStatus = document.getElementById('driver-save-status');
+
+        driverSaveButton.addEventListener('click', async () => {
+            driverSaveButton.disabled = true;
+            driverSaveStatus.textContent = 'Ukládám...';
+            driverSaveStatus.className = '';
+            try {
+                const response = await fetch('driver_save.php', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Chyba serveru');
+                }
+                driverSaveStatus.textContent = '✓ Vážení uloženo';
+                driverSaveStatus.className = 'ok';
+                // Démon zpracuje příznak až při nejbližším cyklu (viz
+                // poll_interval_sec) - krátké zpoždění, ať je co zobrazit.
+                setTimeout(() => {
+                    fetchHistory();
+                    loadLatestWeighingChart();
+                }, 1500);
+            } catch (error) {
+                console.error('Chyba při ukládání vážení řidič:', error);
+                driverSaveStatus.textContent = '✗ Nepodařilo se uložit: ' + error.message;
+                driverSaveStatus.className = 'error';
+            } finally {
+                setTimeout(() => {
+                    driverSaveButton.disabled = false;
+                    driverSaveStatus.textContent = '';
+                    driverSaveStatus.className = '';
+                }, 3000);
             }
         });
 

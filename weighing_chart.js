@@ -119,6 +119,7 @@ function renderWeighingChart(data) {
         weight: r.w,
         stable: r.stable,
         button: r.button,
+        driver: r.driver,
     }));
 
     const { displayT, breaks, totalDisplaySec } = buildDisplayTimeline(points);
@@ -170,10 +171,14 @@ function renderWeighingChart(data) {
     const linePoints = xs.map((px, i) => `${px.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
     svgParts.push(`<polyline points="${linePoints}" fill="none" stroke="#1a73e8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`);
 
-    // Červené značky ručního tlačítka
+    // Červené značky ručního tlačítka (fyzické u váhy) a modré značky
+    // tlačítka "Vážení řidič" (dashboard)
     points.forEach((p, i) => {
         if (p.button) {
             svgParts.push(`<line x1="${xs[i].toFixed(1)}" y1="${padT}" x2="${xs[i].toFixed(1)}" y2="${padT + plotH}" stroke="#d93025" stroke-width="2"></line>`);
+        }
+        if (p.driver) {
+            svgParts.push(`<line x1="${xs[i].toFixed(1)}" y1="${padT}" x2="${xs[i].toFixed(1)}" y2="${padT + plotH}" stroke="#3f51b5" stroke-width="2"></line>`);
         }
     });
 

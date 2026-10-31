@@ -125,7 +125,8 @@ function takeStartPhoto(PDO $pdo, array $config): ?array {
 // takže se každé čtení ukládá rovnou přes insertWeighingReading().
 
 // Uloží dávku čtení (pole ['time' => 'Y-m-d H:i:s.u', 'weight' => float,
-// 'is_stable' => bool, 'is_button_press' => bool]) k jednomu vážení.
+// 'is_stable' => bool, 'is_button_press' => bool, 'is_driver_press' =>
+// bool (nepovinné, default false)]) k jednomu vážení.
 // Stejně jako saveWeight() chybu jen zaloguje a nehodí ji dál - záznam pro
 // graf je vedlejší údaj, nesmí kvůli němu spadnout celý démon (a tím pádem
 // i hlavní vážení). Viz incident 16.10.2026: chybějící GRANT na tuto
@@ -137,8 +138,8 @@ function saveWeighingReadings(PDO $pdo, int $weighingId, array $readings): void 
     }
     try {
         $stmt = $pdo->prepare(
-            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
-             VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press, is_driver_press)
+             VALUES (?, ?, ?, ?, ?, ?)'
         );
         foreach ($readings as $reading) {
             $stmt->execute([
@@ -147,6 +148,7 @@ function saveWeighingReadings(PDO $pdo, int $weighingId, array $readings): void 
                 $reading['weight'],
                 (int)$reading['is_stable'],
                 (int)$reading['is_button_press'],
+                (int)($reading['is_driver_press'] ?? false),
             ]);
         }
     } catch (PDOException $e) {
@@ -155,17 +157,18 @@ function saveWeighingReadings(PDO $pdo, int $weighingId, array $readings): void 
 }
 
 // Uloží jedno čtení rovnou (weighing_id už existuje).
-function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $isStable, bool $isButtonPress): void {
+function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $isStable, bool $isButtonPress, bool $isDriverPress = false): void {
     try {
         $pdo->prepare(
-            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press)
-             VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO weighing_readings (weighing_id, reading_time, weight, is_stable, is_button_press, is_driver_press)
+             VALUES (?, ?, ?, ?, ?, ?)'
         )->execute([
             $weighingId,
             (new DateTimeImmutable())->format('Y-m-d H:i:s.u'),
             $weight,
             (int)$isStable,
             (int)$isButtonPress,
+            (int)$isDriverPress,
         ]);
     } catch (PDOException $e) {
         echo "DB Chyba při ukládání čtení vážení: " . $e->getMessage() . "\n";

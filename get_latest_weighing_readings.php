@@ -35,7 +35,7 @@ try {
     }
 
     $stmt = $pdo->prepare(
-        'SELECT reading_time, weight, is_stable, is_button_press
+        'SELECT reading_time, weight, is_stable, is_button_press, is_driver_press
          FROM weighing_readings WHERE weighing_id = ? ORDER BY reading_time'
     );
     $stmt->execute([$weighing['id']]);
@@ -47,6 +47,7 @@ try {
             'w' => (float)$r['weight'],
             'stable' => (bool)$r['is_stable'],
             'button' => (bool)$r['is_button_press'],
+            'driver' => (bool)$r['is_driver_press'],
         ];
     }, $rows);
 
