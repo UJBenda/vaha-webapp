@@ -4,7 +4,10 @@
 #
 #   git clone https://github.com/UJBenda/vaha-webapp.git /var/www/vaha
 #   cd /var/www/vaha
-#   sudo ./install.sh
+#   ./install.sh          # pokud už jsi přihlášený jako root (časté na
+#                          # minimální/netinstall Debianu, kde sudo ani
+#                          # nemusí být nainstalované)
+#   sudo ./install.sh     # nebo takhle, pokud root nejsi
 #
 # Skript se ptá na vše potřebné (DB, hostname, SSL) a nastaví: systémové
 # balíčky, PostgreSQL (lokální nebo vzdálenou DB), /etc/vaha/vaha.env,
@@ -16,6 +19,10 @@
 # ne na přenos existujících dat ze starého serveru (na to viz README.md).
 
 set -euo pipefail
+
+# Na minimálních instalacích (netinstall) bývá PATH jako root ořezaný a
+# nemusí obsahovat /usr/sbin, kde bydlí runuser/a2enmod/apache2ctl apod.
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 # ----- Pomocné funkce -----
 
@@ -64,8 +71,16 @@ random_token() {
     openssl rand -hex 24
 }
 
+read_env_value() {
+    # read_env_value <soubor> <klíč> -> hodnota za "=" na první shodě,
+    # bez jakéhokoliv shellového vyhodnocení (bezpečné i pro hesla
+    # obsahující $, zpětná lomítka apod.)
+    local file="$1" key="$2"
+    grep -m1 "^${key}=" "$file" 2>/dev/null | cut -d= -f2- || true
+}
+
 if [ "$(id -u)" -ne 0 ]; then
-    fail "Spusť jako root (sudo ./install.sh)."
+    fail "Spusť jako root - buď rovnou ./install.sh (pokud jsi přihlášený jako root), nebo sudo ./install.sh."
     exit 1
 fi
 
@@ -79,24 +94,169 @@ echo "========================================================"
 echo
 
 # ===========================================================
+# 0) Detekce předchozí (možná nedokončené) instalace
+# ===========================================================
+
+VAHA_ENV_FILE="/etc/vaha/vaha.env"
+RECOVERED_DB_HOST="" RECOVERED_DB_PORT="" RECOVERED_DB_NAME="" RECOVERED_DB_USER=""
+RECOVERED_DB_PASS="" RECOVERED_ADMIN_PASSWORD="" RECOVERED_FORCE_SAVE_TOKEN=""
+RECOVERED_APP_DIR="" RECOVERED_HOSTNAME="" RECOVERED_IP_RANGES=""
+
+recover_previous_settings() {
+    info "Načítám nastavení z $VAHA_ENV_FILE..."
+    RECOVERED_DB_HOST=$(read_env_value "$VAHA_ENV_FILE" VAHA_DB_HOST)
+    RECOVERED_DB_PORT=$(read_env_value "$VAHA_ENV_FILE" VAHA_DB_PORT)
+    RECOVERED_DB_NAME=$(read_env_value "$VAHA_ENV_FILE" VAHA_DB_NAME)
+    RECOVERED_DB_USER=$(read_env_value "$VAHA_ENV_FILE" VAHA_DB_USER)
+    RECOVERED_DB_PASS=$(read_env_value "$VAHA_ENV_FILE" VAHA_DB_PASS)
+    RECOVERED_ADMIN_PASSWORD=$(read_env_value "$VAHA_ENV_FILE" VAHA_ADMIN_PASSWORD)
+    RECOVERED_FORCE_SAVE_TOKEN=$(read_env_value "$VAHA_ENV_FILE" VAHA_FORCE_SAVE_TOKEN)
+
+    if [ -f /etc/systemd/system/vaha.service ]; then
+        RECOVERED_APP_DIR=$(sed -n 's#.*ExecStart=/usr/bin/php \(.*\)/weighing_daemon.php#\1#p' /etc/systemd/system/vaha.service | head -n1 || true)
+    fi
+    if [ -f /etc/apache2/sites-available/vaha.conf ]; then
+        RECOVERED_HOSTNAME=$(grep -m1 "ServerName" /etc/apache2/sites-available/vaha.conf | awk '{print $2}' || true)
+        RECOVERED_IP_RANGES=$(grep "Require ip" /etc/apache2/sites-available/vaha.conf | awk '{print $3}' | tr '\n' ' ' | sed 's/ *$//' || true)
+    fi
+}
+
+backup_previous_install() {
+    local backup_dir
+    backup_dir="/root/vaha_backup_$(date +%Y%m%d_%H%M%S)"
+    info "Zálohuji starou instalaci do $backup_dir..."
+    mkdir -p "$backup_dir"
+    # /root je čitelný jen pro roota (0700) - pg_dump při lokální DB běží
+    # pod uživatelem postgres, takže potřebuje group-write přístup, jinak
+    # tam nezapíše (viz "chown root:postgres" vs. výchozí "root:root").
+    chown root:postgres "$backup_dir" 2>/dev/null || true
+    chmod 770 "$backup_dir"
+
+    if [ -n "$RECOVERED_DB_NAME" ]; then
+        if [ -z "$RECOVERED_DB_HOST" ] || [ "$RECOVERED_DB_HOST" = "localhost" ] || [ "$RECOVERED_DB_HOST" = "127.0.0.1" ]; then
+            # /root má 0700 - uživatel postgres se do něj nedostane, i kdyby
+            # měl na podadresář sebevětší práva (chybí mu execute na /root
+            # samotném). Proto dump nejdřív do /tmp (kam postgres zapisovat
+            # může) a hotový soubor pak přesune root, který do /root smí.
+            local tmp_dump="/tmp/vaha_pgdump_$$.dump"
+            if runuser -u postgres -- pg_dump -d "$RECOVERED_DB_NAME" -F c -f "$tmp_dump" 2>/dev/null; then
+                mv "$tmp_dump" "$backup_dir/db.dump"
+                ok "Databáze zazálohována do $backup_dir/db.dump"
+            else
+                rm -f "$tmp_dump"
+                warn "Zálohu databáze se nepodařilo vytvořit (možná ještě ani neexistuje)."
+            fi
+        else
+            if PGPASSWORD="$RECOVERED_DB_PASS" pg_dump -h "$RECOVERED_DB_HOST" -p "${RECOVERED_DB_PORT:-5432}" -U "$RECOVERED_DB_USER" -d "$RECOVERED_DB_NAME" -F c -f "$backup_dir/db.dump" 2>/dev/null; then
+                ok "Databáze zazálohována do $backup_dir/db.dump"
+            else
+                warn "Zálohu databáze se nepodařilo vytvořit."
+            fi
+        fi
+    fi
+
+    cp "$VAHA_ENV_FILE" "$backup_dir/vaha.env" 2>/dev/null || true
+    cp /etc/apache2/sites-available/vaha.conf "$backup_dir/vaha.conf" 2>/dev/null || true
+    cp /etc/systemd/system/vaha.service "$backup_dir/vaha.service" 2>/dev/null || true
+    if [ -n "$RECOVERED_APP_DIR" ] && [ -d "$RECOVERED_APP_DIR/photos" ]; then
+        if tar czf "$backup_dir/photos.tar.gz" -C "$RECOVERED_APP_DIR" photos 2>/dev/null; then
+            ok "Fotky zazálohovány do $backup_dir/photos.tar.gz"
+        fi
+    fi
+    ok "Záloha hotová v $backup_dir - tuhle cestu si pro jistotu zapiš."
+}
+
+wipe_previous_install() {
+    info "Mažu starou instalaci..."
+    systemctl stop vaha.service >/dev/null 2>&1 || true
+    systemctl disable vaha.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/vaha.service
+    systemctl daemon-reload >/dev/null 2>&1 || true
+
+    a2dissite vaha.conf >/dev/null 2>&1 || true
+    rm -f /etc/apache2/sites-available/vaha.conf
+    systemctl restart apache2 >/dev/null 2>&1 || true
+
+    if [ -n "$RECOVERED_DB_NAME" ] && { [ -z "$RECOVERED_DB_HOST" ] || [ "$RECOVERED_DB_HOST" = "localhost" ] || [ "$RECOVERED_DB_HOST" = "127.0.0.1" ]; }; then
+        runuser -u postgres -- psql -c "DROP DATABASE IF EXISTS \"$RECOVERED_DB_NAME\";" >/dev/null 2>&1 || true
+        if [ -n "$RECOVERED_DB_USER" ]; then
+            runuser -u postgres -- psql -c "DROP USER IF EXISTS \"$RECOVERED_DB_USER\";" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    rm -rf /etc/vaha
+    if [ -n "$RECOVERED_APP_DIR" ] && [ -d "$RECOVERED_APP_DIR" ]; then
+        rm -rf "$RECOVERED_APP_DIR"
+    fi
+    ok "Stará instalace smazána."
+}
+
+INSTALL_MODE="fresh"
+
+if [ -f "$VAHA_ENV_FILE" ]; then
+    recover_previous_settings
+    warn "Nalezena existující instalace ($VAHA_ENV_FILE už existuje) - možná z předchozího přerušeného běhu."
+    echo
+    echo "Co chceš udělat?"
+    echo "  1) Pokračovat/opravit - použít stávající nastavení jako výchozí hodnoty"
+    echo "     (Enter = ponechat) a doběhnout/opravit zbylé kroky"
+    echo "  2) Začít znovu - nejdřív zazálohovat starou instalaci (DB + soubory +"
+    echo "     konfigurace do /root/vaha_backup_*), pak čistá instalace"
+    echo "  3) Začít znovu BEZ zálohy - starou instalaci rovnou smazat"
+    echo "  4) Zrušit"
+    resume_choice=$(ask "Volba" "1")
+    case "$resume_choice" in
+        1)
+            INSTALL_MODE="resume"
+            ok "Nastavení načteno - níže uvidíš stávající hodnoty jako výchozí (stačí Enter)."
+            ;;
+        2)
+            backup_previous_install
+            wipe_previous_install
+            RECOVERED_DB_HOST="" RECOVERED_DB_PORT="" RECOVERED_DB_NAME="" RECOVERED_DB_USER=""
+            RECOVERED_DB_PASS="" RECOVERED_ADMIN_PASSWORD="" RECOVERED_FORCE_SAVE_TOKEN=""
+            RECOVERED_APP_DIR="" RECOVERED_HOSTNAME="" RECOVERED_IP_RANGES=""
+            ;;
+        3)
+            if ask_yn "Opravdu smazat starou instalaci BEZ zálohy? Tohle je nevratné." "n"; then
+                wipe_previous_install
+                RECOVERED_DB_HOST="" RECOVERED_DB_PORT="" RECOVERED_DB_NAME="" RECOVERED_DB_USER=""
+                RECOVERED_DB_PASS="" RECOVERED_ADMIN_PASSWORD="" RECOVERED_FORCE_SAVE_TOKEN=""
+                RECOVERED_APP_DIR="" RECOVERED_HOSTNAME="" RECOVERED_IP_RANGES=""
+            else
+                echo "Zrušeno."
+                exit 0
+            fi
+            ;;
+        *)
+            echo "Zrušeno."
+            exit 0
+            ;;
+    esac
+    echo
+fi
+
+# ===========================================================
 # 1) Interaktivní otázky
 # ===========================================================
 
 info "Adresář aplikace"
-APP_DIR=$(ask "Kam appku nainstalovat" "$APP_DIR_DEFAULT")
+APP_DIR=$(ask "Kam appku nainstalovat" "${RECOVERED_APP_DIR:-$APP_DIR_DEFAULT}")
 
 info "Databáze"
-DB_HOST=$(ask "Hostname/IP PostgreSQL serveru (prázdné = lokální instalace)" "localhost")
-DB_PORT=$(ask "Port PostgreSQL" "5432")
-DB_NAME=$(ask "Jméno databáze" "vaha")
-DB_USER=$(ask "Databázový uživatel appky" "vaha")
+DB_HOST=$(ask "Hostname/IP PostgreSQL serveru (prázdné = lokální instalace)" "${RECOVERED_DB_HOST:-localhost}")
+DB_PORT=$(ask "Port PostgreSQL" "${RECOVERED_DB_PORT:-5432}")
+DB_NAME=$(ask "Jméno databáze" "${RECOVERED_DB_NAME:-vaha}")
+DB_USER=$(ask "Databázový uživatel appky" "${RECOVERED_DB_USER:-vaha}")
 
 DB_IS_LOCAL=0
 if [ "$DB_HOST" = "localhost" ] || [ "$DB_HOST" = "127.0.0.1" ]; then
     DB_IS_LOCAL=1
 fi
 
-if [ "$DB_IS_LOCAL" -eq 1 ]; then
+if [ -n "$RECOVERED_DB_PASS" ] && ask_yn "Ponechat stávající heslo k DB uživateli '$DB_USER'?" "y"; then
+    DB_PASS="$RECOVERED_DB_PASS"
+elif [ "$DB_IS_LOCAL" -eq 1 ]; then
     info "DB běží lokálně - skript nainstaluje PostgreSQL a sám založí uživatele i databázi."
     if ask_yn "Vygenerovat náhodné heslo pro DB uživatele automaticky?" "y"; then
         DB_PASS=$(random_token)
@@ -115,7 +275,7 @@ fi
 DB_PASS_SQL=${DB_PASS//\'/\'\'}
 
 info "Webový server"
-HOSTNAME=$(ask "Doménové jméno appky (např. vaha.firma.cz)" "")
+HOSTNAME=$(ask "Doménové jméno appky (např. vaha.firma.cz)" "$RECOVERED_HOSTNAME")
 if [ -z "$HOSTNAME" ]; then
     fail "Hostname je povinný."
     exit 1
@@ -126,7 +286,8 @@ echo "Appka řídí váhu a otevírá kamery - doporučujeme ji nenechávat voln
 echo "přístupnou z celého internetu. Zadej IP rozsahy, odkud má být appka"
 echo "dostupná (např. 192.168.1.0/24), oddělené mezerou. Prázdné = bez"
 echo "omezení (přístupné odkudkoliv, admin.html je pak chráněný jen heslem)."
-read -r -a ALLOWED_IP_RANGES -p "Povolené IP rozsahy: "
+ip_ranges_str=$(ask "Povolené IP rozsahy" "$RECOVERED_IP_RANGES")
+read -r -a ALLOWED_IP_RANGES <<< "$ip_ranges_str"
 
 USE_HTTPS=1
 if ! ask_yn "Nastavit appku na HTTPS (443) - doporučeno, vyžaduje certifikát? Ne = jen HTTP (80)" "y"; then
@@ -162,13 +323,22 @@ if [ "$USE_HTTPS" -eq 1 ]; then
 fi
 
 info "Administrace"
-ADMIN_PASSWORD=$(ask_secret "Heslo pro přihlášení do administrace (admin.html)")
-if [ -z "$ADMIN_PASSWORD" ]; then
-    fail "Heslo administrace nesmí být prázdné."
-    exit 1
+if [ -n "$RECOVERED_ADMIN_PASSWORD" ] && ask_yn "Ponechat stávající heslo administrace?" "y"; then
+    ADMIN_PASSWORD="$RECOVERED_ADMIN_PASSWORD"
+else
+    ADMIN_PASSWORD=$(ask_secret "Heslo pro přihlášení do administrace (admin.html)")
+    if [ -z "$ADMIN_PASSWORD" ]; then
+        fail "Heslo administrace nesmí být prázdné."
+        exit 1
+    fi
 fi
 
-FORCE_SAVE_TOKEN=$(random_token)
+if [ -n "$RECOVERED_FORCE_SAVE_TOKEN" ]; then
+    FORCE_SAVE_TOKEN="$RECOVERED_FORCE_SAVE_TOKEN"
+    ok "Ponechávám stávající token pro tlačítko u váhy (ať nemusíš přenastavovat webhook na Shelly)."
+else
+    FORCE_SAVE_TOKEN=$(random_token)
+fi
 
 echo
 if ! ask_yn "Nastavit časovou zónu systému na Europe/Prague?" "y"; then
@@ -189,6 +359,7 @@ fi
 
 echo
 info "Shrnutí:"
+echo "  Režim:           $( [ "$INSTALL_MODE" = "resume" ] && echo 'oprava/pokračování existující instalace' || echo 'čistá instalace' )"
 echo "  Adresář appky:   $APP_DIR"
 echo "  Databáze:        $DB_USER@$DB_HOST:$DB_PORT/$DB_NAME $( [ "$DB_IS_LOCAL" -eq 1 ] && echo '(lokální, skript ji založí)' || echo '(vzdálená, musí už existovat)')"
 echo "  Hostname:        $HOSTNAME"
@@ -277,20 +448,20 @@ info "Databáze..."
 if [ "$DB_IS_LOCAL" -eq 1 ]; then
     systemctl enable --now postgresql >/dev/null
 
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
+    if runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1; then
         warn "DB uživatel '$DB_USER' už existuje, heslo přenastavím."
-        sudo -u postgres psql -c "ALTER USER \"$DB_USER\" WITH PASSWORD '$DB_PASS_SQL';" >/dev/null
+        runuser -u postgres -- psql -c "ALTER USER \"$DB_USER\" WITH PASSWORD '$DB_PASS_SQL';" >/dev/null
     else
-        sudo -u postgres psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '$DB_PASS_SQL';" >/dev/null
+        runuser -u postgres -- psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '$DB_PASS_SQL';" >/dev/null
     fi
 
-    if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+    if runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
         warn "Databáze '$DB_NAME' už existuje, schéma níže se vytvoří jen pokud tabulky ještě nejsou (IF NOT EXISTS)."
     else
-        sudo -u postgres psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_USER\";" >/dev/null
+        runuser -u postgres -- psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_USER\";" >/dev/null
     fi
 
-    PSQL_RUN=(sudo -u postgres psql -d "$DB_NAME")
+    PSQL_RUN=(runuser -u postgres -- psql -d "$DB_NAME")
 else
     info "Ověřuji spojení na vzdálenou DB $DB_HOST:$DB_PORT..."
     if ! PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1" >/dev/null 2>&1; then
@@ -361,8 +532,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 SQL
 
 if [ "$DB_IS_LOCAL" -eq 1 ]; then
-    sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"$DB_USER\";" >/dev/null
-    sudo -u postgres psql -d "$DB_NAME" -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"$DB_USER\";" >/dev/null
+    runuser -u postgres -- psql -d "$DB_NAME" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"$DB_USER\";" >/dev/null
+    runuser -u postgres -- psql -d "$DB_NAME" -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"$DB_USER\";" >/dev/null
 fi
 ok "Databáze připravena."
 
@@ -573,6 +744,10 @@ ok "cron nastaven."
 if [ "$SETUP_BACKUP_CRON" -eq 1 ]; then
     info "Nastavuji noční zálohu databáze..."
     mkdir -p /var/backups/vaha
+    # Při lokální DB běží pg_dump v cronu pod uživatelem postgres (viz níž) -
+    # výchozí root:root 0755 by mu zápis do adresáře nedovolilo.
+    chown root:postgres /var/backups/vaha 2>/dev/null || true
+    chmod 770 /var/backups/vaha
     cat > /usr/local/bin/vaha-backup-db.sh <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -580,7 +755,7 @@ STAMP=\$(date +%Y%m%d)
 EOF
     if [ "$DB_IS_LOCAL" -eq 1 ]; then
         cat >> /usr/local/bin/vaha-backup-db.sh <<EOF
-sudo -u postgres pg_dump -d "$DB_NAME" -F c -f "/var/backups/vaha/vaha-\$STAMP.dump"
+runuser -u postgres -- pg_dump -d "$DB_NAME" -F c -f "/var/backups/vaha/vaha-\$STAMP.dump"
 EOF
     else
         # printf %q zajistí, že heslo je ve vygenerovaném skriptu bezpečně
