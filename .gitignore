@@ -1,0 +1,16 @@
+# Runtime soubory zapisované weighing_daemon.php/mediamtx_client.php za běhu
+# appky na serveru - nejsou součást zdrojového kódu, nepatří do gitu.
+live_weight.txt
+scale_raw.txt
+force_save.flag
+driver_save_last.txt
+spz.jpg
+test_fotka.jpg
+photos/
+stream/
+.easyocr_models/
+
+# Editorové/záložní soubory (např. omylem uložená kopie se suffixem data/času)
+*.php-[0-9]*
+*.bak
+*.swp
