@@ -143,6 +143,7 @@
             <button class="tab-button active" data-tab="cameras">Kamery</button>
             <button class="tab-button" data-tab="templates">Šablony kamer</button>
             <button class="tab-button" data-tab="settings">Nastavení váhy</button>
+            <button class="tab-button" data-tab="scales">Váhy</button>
         </div>
 
         <!-- Kamery -->
@@ -246,6 +247,67 @@
             <button id="save-settings-button">Uložit nastavení</button>
         </div>
 
+        <!-- Váhy -->
+        <div class="panel" id="panel-scales">
+            <h2>Váhy</h2>
+            <p class="hint">
+                Jen jedna váha může být najednou "aktivní" - tu sleduje weighing_daemon.php.
+                Změna IP/portu/protokolu nebo přepnutí aktivní váhy se projeví, až
+                weighing_daemon.php znovu naváže spojení (při dalším restartu služby
+                nebo výpadku spojení).
+            </p>
+            <table id="scales-table">
+                <thead>
+                    <tr>
+                        <th>Jméno</th>
+                        <th>Protokol</th>
+                        <th>IP adresa</th>
+                        <th>Port</th>
+                        <th>Aktivní</th>
+                        <th>Akce</th>
+                    </tr>
+                </thead>
+                <tbody id="scales-body">
+                    <tr><td colspan="6">Načítání...</td></tr>
+                </tbody>
+            </table>
+            <button id="add-scale-button">+ Přidat váhu</button>
+
+            <div id="scale-form-wrap" style="display:none; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
+                <h2 id="scale-form-title">Nová váha</h2>
+                <form id="scale-form">
+                    <input type="hidden" id="scale-id">
+                    <div class="form-grid">
+                        <div>
+                            <label for="scale-name">Jméno</label>
+                            <input type="text" id="scale-name" required>
+                        </div>
+                        <div>
+                            <label for="scale-protocol">Protokol</label>
+                            <select id="scale-protocol" required>
+                                <option value="generic_csv">Obecný (dotaz "MSV?;", CSV odpověď)</option>
+                                <option value="it1_the">SysTec IT1 - Online mode (RN/RM)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="scale-ip">IP adresa</label>
+                            <input type="text" id="scale-ip" placeholder="192.168.1.164" required>
+                        </div>
+                        <div>
+                            <label for="scale-port">Port</label>
+                            <input type="text" id="scale-port" placeholder="10001" required>
+                        </div>
+                    </div>
+                    <div id="scale-form-error" class="error"></div>
+                    <div style="margin-top: 16px;">
+                        <button type="submit">Uložit</button>
+                        <button type="button" class="secondary" id="scale-test-button">Otestovat</button>
+                        <button type="button" class="secondary" id="scale-form-cancel">Zrušit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <!-- Šablony -->
         <div class="panel" id="panel-templates">
             <h2>Šablony kamer</h2>
@@ -293,7 +355,7 @@
     <div id="test-modal">
         <div class="modal-box">
             <div class="modal-header">
-                <h3 style="margin:0;">Test kamery</h3>
+                <h3 style="margin:0;" id="test-modal-title">Test kamery</h3>
                 <button class="secondary" id="test-modal-close">Zavřít</button>
             </div>
             <div id="test-modal-content"></div>
@@ -331,6 +393,7 @@
             adminView.style.display = 'block';
             loadTemplates().then(loadCameras);
             loadSettings();
+            loadScales();
         }
 
         document.getElementById('login-button').addEventListener('click', doLogin);
@@ -510,6 +573,7 @@
         });
 
         async function testCamera(id) {
+            document.getElementById('test-modal-title').textContent = 'Test kamery';
             testModal.style.display = 'flex';
             testModalContent.innerHTML = '<p>⏳ Připojuji se ke kameře a stahuji snímek... (může to trvat až 5 s)</p>';
 
@@ -648,6 +712,145 @@
             }
             await loadSettings();
         });
+
+        // ----- Váhy -----
+        let scalesCache = [];
+        const SCALE_PROTOCOL_LABELS = {
+            generic_csv: 'Obecný (MSV?)',
+            it1_the: 'SysTec IT1 (RN/RM)',
+        };
+
+        async function loadScales() {
+            const { data } = await api('list_scales');
+            if (!data.ok) return;
+            scalesCache = data.items;
+
+            const body = document.getElementById('scales-body');
+            body.innerHTML = '';
+            if (scalesCache.length === 0) {
+                body.innerHTML = '<tr><td colspan="6">Žádné váhy - přidej aspoň jednu a nastav ji jako aktivní.</td></tr>';
+            }
+            scalesCache.forEach(s => {
+                const tr = document.createElement('tr');
+                const activeCell = s.active
+                    ? '<span class="badge yes">aktivní</span>'
+                    : `<button data-activate-scale="${s.id}">Nastavit aktivní</button>`;
+                tr.innerHTML = `
+                    <td>${escapeHtml(s.name)}</td>
+                    <td>${escapeHtml(SCALE_PROTOCOL_LABELS[s.protocol] || s.protocol)}</td>
+                    <td>${escapeHtml(s.ip_address)}</td>
+                    <td>${escapeHtml(String(s.port))}</td>
+                    <td>${activeCell}</td>
+                    <td class="actions">
+                        <button data-test-scale="${s.id}">Test</button>
+                        <button data-edit-scale="${s.id}">Upravit</button>
+                        <button class="danger" data-delete-scale="${s.id}">Smazat</button>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+
+            body.querySelectorAll('[data-activate-scale]').forEach(btn => {
+                btn.addEventListener('click', () => activateScale(btn.dataset.activateScale));
+            });
+            body.querySelectorAll('[data-test-scale]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const s = scalesCache.find(x => String(x.id) === String(btn.dataset.testScale));
+                    if (s) testScale({ protocol: s.protocol, ip_address: s.ip_address, port: s.port });
+                });
+            });
+            body.querySelectorAll('[data-edit-scale]').forEach(btn => {
+                btn.addEventListener('click', () => openScaleForm(btn.dataset.editScale));
+            });
+            body.querySelectorAll('[data-delete-scale]').forEach(btn => {
+                btn.addEventListener('click', () => deleteScale(btn.dataset.deleteScale));
+            });
+        }
+
+        async function activateScale(id) {
+            const { data } = await api('set_active_scale', { id });
+            if (!data.ok) {
+                alert(data.error || 'Nastavení aktivní váhy selhalo');
+                return;
+            }
+            await loadScales();
+        }
+
+        async function deleteScale(id) {
+            if (!confirm('Smazat tuto váhu?')) return;
+            const { data } = await api('delete_scale', { id });
+            if (!data.ok) {
+                alert(data.error || 'Smazání selhalo');
+                return;
+            }
+            await loadScales();
+        }
+
+        const scaleFormWrap = document.getElementById('scale-form-wrap');
+        const scaleForm = document.getElementById('scale-form');
+        const scaleFormError = document.getElementById('scale-form-error');
+
+        document.getElementById('add-scale-button').addEventListener('click', () => openScaleForm(null));
+        document.getElementById('scale-form-cancel').addEventListener('click', () => scaleFormWrap.style.display = 'none');
+
+        function openScaleForm(id) {
+            scaleFormError.textContent = '';
+            const s = scalesCache.find(x => String(x.id) === String(id));
+            document.getElementById('scale-form-title').textContent = s ? 'Upravit váhu' : 'Nová váha';
+            document.getElementById('scale-id').value = s ? s.id : '';
+            document.getElementById('scale-name').value = s ? s.name : '';
+            document.getElementById('scale-protocol').value = s ? s.protocol : 'generic_csv';
+            document.getElementById('scale-ip').value = s ? s.ip_address : '';
+            document.getElementById('scale-port').value = s ? s.port : '';
+            scaleFormWrap.style.display = 'block';
+        }
+
+        scaleForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            scaleFormError.textContent = '';
+            const payload = {
+                id: document.getElementById('scale-id').value || null,
+                name: document.getElementById('scale-name').value,
+                protocol: document.getElementById('scale-protocol').value,
+                ip_address: document.getElementById('scale-ip').value,
+                port: document.getElementById('scale-port').value,
+            };
+            const { data } = await api('save_scale', payload);
+            if (!data.ok) {
+                scaleFormError.textContent = data.error || 'Uložení selhalo';
+                return;
+            }
+            scaleFormWrap.style.display = 'none';
+            await loadScales();
+        });
+
+        document.getElementById('scale-test-button').addEventListener('click', () => {
+            testScale({
+                protocol: document.getElementById('scale-protocol').value,
+                ip_address: document.getElementById('scale-ip').value,
+                port: document.getElementById('scale-port').value,
+            });
+        });
+
+        async function testScale(params) {
+            document.getElementById('test-modal-title').textContent = 'Test váhy';
+            testModal.style.display = 'flex';
+            testModalContent.innerHTML = '<p>⏳ Připojuji se k váze a čtu odpověď... (může to trvat až 5 s)</p>';
+
+            const { data } = await api('test_scale', params);
+            if (data.ok) {
+                testModalContent.innerHTML = `
+                    <p><strong>Přečtená váha: ${escapeHtml(String(data.weight))} kg</strong></p>
+                    <div class="hint">Syrová odpověď váhy:</div>
+                    <pre>${escapeHtml(data.raw || '')}</pre>
+                `;
+            } else {
+                testModalContent.innerHTML = `
+                    <p class="error">${escapeHtml(data.error || 'Test selhal')}</p>
+                    ${data.raw ? `<div class="hint">Syrová odpověď váhy:</div><pre>${escapeHtml(data.raw)}</pre>` : ''}
+                `;
+            }
+        }
 
         // ----- Start: zjistit, jestli je uživatel už přihlášený -----
         (async () => {

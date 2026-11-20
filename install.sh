@@ -529,6 +529,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     setting_value TEXT,
     description TEXT
 );
+
+CREATE TABLE IF NOT EXISTS scales (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    protocol VARCHAR(30) NOT NULL DEFAULT 'generic_csv',
+    ip_address VARCHAR(100) NOT NULL,
+    port INTEGER NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Nejvýš jeden řádek smí mít active = true (weighing_daemon.php sleduje
+-- jen jednu váhu najednou - viz loadActiveScale() ve weighing_lib.php).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scales_single_active ON scales (active) WHERE active;
 SQL
 
 if [ "$DB_IS_LOCAL" -eq 1 ]; then

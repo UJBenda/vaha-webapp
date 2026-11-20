@@ -9,6 +9,7 @@ session_start();
 $config = require __DIR__ . '/config.php';
 require __DIR__ . '/mediamtx_client.php';
 require __DIR__ . '/camera_sync.php';
+require __DIR__ . '/weighing_lib.php';
 
 header('Content-Type: application/json');
 
@@ -249,6 +250,94 @@ switch ($action) {
             $update->execute([(string)$value, (string)$key]);
         }
         respond(['ok' => true]);
+    }
+
+    // ----- Váhy (IP/port/protokol terminálu - viz weighing_lib.php) -----
+
+    case 'list_scales': {
+        respond(['ok' => true, 'items' => $pdo->query('SELECT * FROM scales ORDER BY id')->fetchAll(PDO::FETCH_ASSOC)]);
+    }
+
+    case 'save_scale': {
+        $id = $input['id'] ?? null;
+        $name = trim((string)($input['name'] ?? ''));
+        $protocol = (string)($input['protocol'] ?? '');
+        $ip = trim((string)($input['ip_address'] ?? ''));
+        $port = (int)($input['port'] ?? 0);
+
+        if (!in_array($protocol, SCALE_PROTOCOLS, true)) {
+            respond(['ok' => false, 'error' => 'Neplatný protokol'], 400);
+        }
+        if ($name === '' || $ip === '' || $port < 1 || $port > 65535) {
+            respond(['ok' => false, 'error' => 'Chybí povinné pole (jméno, IP, platný port)'], 400);
+        }
+
+        if ($id) {
+            // "active" se tady nemění - zapíná/vypíná se výhradně přes
+            // set_active_scale, aby nešlo omylem obejít pravidlo "nejvýš
+            // jedna aktivní váha" uložením formuláře.
+            $pdo->prepare('UPDATE scales SET name=?, protocol=?, ip_address=?, port=? WHERE id=?')
+                ->execute([$name, $protocol, $ip, $port, $id]);
+        } else {
+            $pdo->prepare('INSERT INTO scales (name, protocol, ip_address, port, active) VALUES (?, ?, ?, ?, false)')
+                ->execute([$name, $protocol, $ip, $port]);
+        }
+
+        respond(['ok' => true]);
+    }
+
+    case 'set_active_scale': {
+        $id = $input['id'] ?? null;
+        if (!$id) {
+            respond(['ok' => false, 'error' => 'Chybí id'], 400);
+        }
+        $pdo->beginTransaction();
+        $pdo->exec('UPDATE scales SET active = false');
+        $pdo->prepare('UPDATE scales SET active = true WHERE id = ?')->execute([$id]);
+        $pdo->commit();
+        respond(['ok' => true]);
+    }
+
+    case 'delete_scale': {
+        $id = $input['id'] ?? null;
+        if (!$id) {
+            respond(['ok' => false, 'error' => 'Chybí id'], 400);
+        }
+        $pdo->prepare('DELETE FROM scales WHERE id = ?')->execute([$id]);
+        respond(['ok' => true]);
+    }
+
+    // Připojí se přímo k váze (bez ohledu na to, jestli je "aktivní") a
+    // zkusí jedno čtení - pro rychlé ověření IP/portu/protokolu z
+    // administrace, bez nutnosti ukládat a restartovat vaha.service.
+    case 'test_scale': {
+        $protocol = (string)($input['protocol'] ?? '');
+        $ip = trim((string)($input['ip_address'] ?? ''));
+        $port = (int)($input['port'] ?? 0);
+
+        if (!in_array($protocol, SCALE_PROTOCOLS, true) || $ip === '' || $port < 1 || $port > 65535) {
+            respond(['ok' => false, 'error' => 'Chybí nebo neplatná IP/port/protokol'], 400);
+        }
+
+        $socket = @stream_socket_client("tcp://$ip:$port", $errno, $errstr, 5);
+        if (!$socket) {
+            respond(['ok' => false, 'error' => "Nelze se připojit: $errstr ($errno)"], 502);
+        }
+        stream_set_timeout($socket, 5);
+
+        fwrite($socket, buildScaleCommand($protocol));
+        $raw = fread($socket, 1024);
+        $meta = stream_get_meta_data($socket);
+        fclose($socket);
+
+        if ($raw === false || $raw === '') {
+            $reason = !empty($meta['timed_out']) ? ' (timeout)' : '';
+            respond(['ok' => false, 'error' => "Váha neodpověděla$reason"], 502);
+        }
+
+        $errorMessage = null;
+        $weight = parseScaleResponse($protocol, $raw, $errorMessage);
+        respond(['ok' => $weight !== null, 'raw' => $raw, 'weight' => $weight, 'error' => $errorMessage]);
     }
 
     default:

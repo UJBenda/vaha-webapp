@@ -1,8 +1,7 @@
 <?php
-// ----- NASTAVENÍ VÁHY (hardware, needituje se přes admin) -----
-$scale_ip = '192.168.1.164';
-$scale_port = 10001;
-$scale_command = "MSV?;\r\n";
+// IP/port/protokol váhy se nastavují v administraci (Administrace > Váhy) -
+// viz loadActiveScale() ve weighing_lib.php. Natvrdo v kódu zůstávají jen
+// výchozí hodnoty logiky vážení níže.
 
 // Výchozí hodnoty logiky - přebijí se hodnotami z app_settings (viz
 // loadSettings() ve weighing_lib.php), pokud tam admin něco nastaví. Načtou
@@ -65,6 +64,16 @@ while (true) {
     $departure_tail_sec = $settings['departure_tail_sec'];
     $departure_empty_kg = $settings['departure_empty_kg'];
 
+    $scale = loadActiveScale($pdo);
+    if ($scale === null) {
+        echo "Není nastavena žádná aktivní váha (Administrace > Váhy). Zkouším znovu za 5s...\n";
+        sleep(5);
+        continue;
+    }
+    $scale_ip = $scale['ip_address'];
+    $scale_port = (int)$scale['port'];
+    $scale_protocol = $scale['protocol'];
+
     $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
     if ($socket === false) {
         echo "Nelze vytvořit socket\n";
@@ -80,10 +89,10 @@ while (true) {
         continue;
     }
 
-    echo "Připojeno k váze. Stav: $current_state\n";
+    echo "Připojeno k váze '{$scale['name']}' (protokol $scale_protocol). Stav: $current_state\n";
 
     while (true) {
-        $weight = getWeightFromScale($socket, $scale_command, $rawResponse);
+        $weight = getWeightFromScale($socket, $scale_protocol, $rawResponse);
 
         if ($weight === null) {
             echo "Ztráta spojení nebo chyba dat. Rekonektuji...\n";

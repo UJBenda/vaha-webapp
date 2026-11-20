@@ -258,10 +258,109 @@ function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
     }
 }
 
+// ----- Komunikace s váhou - podporované protokoly -----
+//
+// 'generic_csv': jednoduchý dotaz/odpověď (výchozí, odpovídá původnímu
+//   natvrdo napsanému chování appky) - dotaz "MSV?;\r\n", odpověď = čárkou
+//   oddělené hodnoty, první pole je váha (číslo).
+//
+// 'it1_the': SysTec IT1 - "Online Mode SysTec Standard" (Technical Manual
+//   IT1 Rev. 3, kap. 18). Terminál musí být přepnutý do režimu ONLINE
+//   (tlačítko Return v hlavním zobrazení). Dotaz "<RM1>" = "Read Weight (in
+//   motion)" - vrátí váhu okamžitě i neustálenou (vlastní stabilizaci řeší
+//   weighing_daemon.php sám pomocí stability_time_sec/stability_margin_kg,
+//   nemá smysl čekat až 10s na terminálu jako u "RN"). Odpověď je 62bajtový
+//   řetězec s pevnou šířkou polí orámovaný '<' '>' (viz kap. 18.3):
+//   byte 1-2 = chybový kód ("00" = OK), byte 23-30 = hrubá váha (gross) -
+//   appka netáruje, celé vozidlo stojí na můstku od prázdného po naložený
+//   stav, takže "váha" appky odpovídá hrubé váze terminálu.
+const SCALE_PROTOCOLS = ['generic_csv', 'it1_the'];
+
+const IT1_THE_ERROR_CODES = [
+    '00' => 'OK',
+    '11' => 'Obecná chyba váhy (např. není připojen snímač)',
+    '12' => 'Přetížení váhy',
+    '13' => 'Váha se nestabilizovala do 10 s',
+    '15' => 'Chyba tárování/nulování',
+    '31' => 'Chyba přenosu (např. příliš dlouhý řetězec nebo timeout)',
+    '32' => 'Neplatný příkaz',
+    '33' => 'Neplatný parametr',
+];
+
+function buildScaleCommand(string $protocol): string {
+    if ($protocol === 'it1_the') {
+        return '<RM1>';
+    }
+    return "MSV?;\r\n";
+}
+
+function parseIT1TheResponse(string $response, ?string &$errorMessage = null): ?float {
+    $content = trim($response);
+    if ($content !== '' && $content[0] === '<') {
+        $content = substr($content, 1);
+    }
+    $gtPos = strpos($content, '>');
+    if ($gtPos !== false) {
+        $content = substr($content, 0, $gtPos);
+    }
+
+    // Gross (hrubá váha) končí na bajtu 30 (offset 22, délka 8) - viz
+    // Technical Manual IT1 Rev. 3, str. 100, tabulka "Response" pro RN/RM.
+    if (strlen($content) < 30) {
+        $errorMessage = 'Odpověď je příliš krátká (očekává se min. 30 znaků, viz Technical Manual IT1 kap. 18.3)';
+        return null;
+    }
+
+    $errorCode = substr($content, 0, 2);
+    if ($errorCode !== '00') {
+        $errorMessage = "Váha vrátila chybu $errorCode: " . (IT1_THE_ERROR_CODES[$errorCode] ?? 'neznámý kód');
+        return null;
+    }
+
+    $gross = str_replace(',', '.', trim(substr($content, 22, 8)));
+    if ($gross === '' || !is_numeric($gross)) {
+        $errorMessage = "Pole 'Gross' se nepodařilo rozparsovat jako číslo: '$gross'";
+        return null;
+    }
+
+    return (float)$gross;
+}
+
+function parseGenericCsvResponse(string $response, ?string &$errorMessage = null): ?float {
+    $parts = explode(',', trim($response));
+    if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
+        return (float)trim($parts[0]);
+    }
+    $errorMessage = "Odpověď se nepodařilo rozparsovat jako čárkou oddělené hodnoty: '$response'";
+    return null;
+}
+
+function parseScaleResponse(string $protocol, string $response, ?string &$errorMessage = null): ?float {
+    if ($protocol === 'it1_the') {
+        return parseIT1TheResponse($response, $errorMessage);
+    }
+    return parseGenericCsvResponse($response, $errorMessage);
+}
+
+// ----- Aktivně vybraná váha (Administrace > Váhy) -----
+// weighing_daemon.php sleduje vždy jen jednu váhu - tu s active = true.
+// Pokud žádná není nastavená (čistá instalace, admin ještě nic nepřidal),
+// vrátí null a démon na to má zareagovat čekáním, ne pádem.
+function loadActiveScale(PDO $pdo): ?array {
+    try {
+        $row = $pdo->query('SELECT * FROM scales WHERE active = true ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    } catch (PDOException $e) {
+        echo "Nastavení váhy se nepodařilo načíst z DB: " . $e->getMessage() . "\n";
+        return null;
+    }
+}
+
 // Funkce getWeightFromScale() - $rawOut (nepovinné, reference) dostane
 // syrovou odpověď z váhy přesně tak, jak přišla (kvůli scale_relay.php,
 // který ji přeposílá dál dodavatelskému SW).
-function getWeightFromScale($socket, $command, ?string &$rawOut = null) {
+function getWeightFromScale($socket, string $protocol, ?string &$rawOut = null): ?float {
+    $command = buildScaleCommand($protocol);
     socket_write($socket, $command, strlen($command));
     $response = socket_read($socket, 1024);
 
@@ -270,10 +369,5 @@ function getWeightFromScale($socket, $command, ?string &$rawOut = null) {
     }
 
     $rawOut = trim($response);
-
-    $parts = explode(',', $rawOut);
-    if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
-        return (float)trim($parts[0]);
-    }
-    return null;
+    return parseScaleResponse($protocol, $rawOut);
 }
