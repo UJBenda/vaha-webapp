@@ -142,6 +142,20 @@
             transform: translate(-50%, -115%);
             display: none;
         }
+
+        /* ----- Lupa na fotkách (najetí myší = kroužek se zvětšenou částí) ----- */
+        .magnifiable { cursor: zoom-in; }
+        .img-magnifier-lens {
+            display: none;
+            position: fixed;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+            background-repeat: no-repeat;
+            background-color: #000;
+            pointer-events: none;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
@@ -151,7 +165,7 @@
 
     <div class="container">
         <div class="detail-photo-card">
-            <img id="detail-photo-img" src="" alt="Fotka vozidla" style="display:none;">
+            <img id="detail-photo-img" class="magnifiable" src="" alt="Fotka vozidla" style="display:none;">
             <div id="detail-no-photo" class="no-photo">Žádná fotka</div>
             <div id="detail-gallery" class="detail-gallery"></div>
         </div>
@@ -183,6 +197,73 @@
 
     <script src="weighing_chart.js"></script>
     <script>
+        // ----- Lupa na fotkách -----
+        // Kroužek sleduje kurzor a ukazuje zvětšenou (ZOOM×) verzi oblasti
+        // fotky pod ním - zoom je vztažený k zobrazené (CSS) velikosti
+        // obrázku, takže funguje stejně bez ohledu na skutečné rozlišení
+        // fotky. Velikost kroužku se přizpůsobí velikosti konkrétního
+        // obrázku (menší u malých náhledů v galerii, max. u velké hlavní
+        // fotky), ať nikdy není větší než fotka samotná.
+        const MAGNIFIER_MIN_SIZE = 70;
+        const MAGNIFIER_MAX_SIZE = 180;
+        const MAGNIFIER_ZOOM = 4;
+
+        const magnifierLens = document.createElement('div');
+        magnifierLens.className = 'img-magnifier-lens';
+        document.body.appendChild(magnifierLens);
+
+        function magnifierSizeFor(rect) {
+            return Math.max(MAGNIFIER_MIN_SIZE, Math.min(MAGNIFIER_MAX_SIZE, Math.min(rect.width, rect.height) * 0.9));
+        }
+
+        function moveMagnifierLens(img, clientX, clientY) {
+            const rect = img.getBoundingClientRect();
+            const size = magnifierSizeFor(rect);
+            const half = size / 2;
+            magnifierLens.style.width = size + 'px';
+            magnifierLens.style.height = size + 'px';
+
+            const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+            const y = Math.max(0, Math.min(clientY - rect.top, rect.height));
+
+            // Samotný kroužek se nesmí vykreslit mimo fotku (jinak by u
+            // okraje "visel" nad okolním obsahem stránky) - jeho pozice se
+            // proto zvlášť zarovná tak, aby celý zůstal uvnitř rect.
+            const lensLeft = Math.max(rect.left, Math.min(clientX - half, rect.right - size));
+            const lensTop = Math.max(rect.top, Math.min(clientY - half, rect.bottom - size));
+            magnifierLens.style.left = lensLeft + 'px';
+            magnifierLens.style.top = lensTop + 'px';
+            magnifierLens.style.backgroundSize = `${rect.width * MAGNIFIER_ZOOM}px ${rect.height * MAGNIFIER_ZOOM}px`;
+            magnifierLens.style.backgroundPosition =
+                `${-(x * MAGNIFIER_ZOOM - half)}px ${-(y * MAGNIFIER_ZOOM - half)}px`;
+        }
+
+        function attachMagnifier(img) {
+            img.addEventListener('mouseenter', () => {
+                magnifierLens.style.backgroundImage = `url('${img.src}')`;
+                magnifierLens.style.display = 'block';
+            });
+            img.addEventListener('mousemove', (e) => moveMagnifierLens(img, e.clientX, e.clientY));
+            img.addEventListener('mouseleave', () => {
+                magnifierLens.style.display = 'none';
+            });
+
+            // Dotykové ovládání (tablet) - podrž prst na fotce.
+            img.addEventListener('touchstart', (e) => {
+                magnifierLens.style.backgroundImage = `url('${img.src}')`;
+                magnifierLens.style.display = 'block';
+                moveMagnifierLens(img, e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+            img.addEventListener('touchmove', (e) => {
+                moveMagnifierLens(img, e.touches[0].clientX, e.touches[0].clientY);
+            }, { passive: true });
+            img.addEventListener('touchend', () => {
+                magnifierLens.style.display = 'none';
+            });
+        }
+
+        attachMagnifier(document.getElementById('detail-photo-img'));
+
         const params = new URLSearchParams(window.location.search);
         const weighingId = params.get('id');
 
@@ -225,6 +306,7 @@
                 if (p.photo_path === w.photo_path) return; // už zobrazeno jako hlavní fotka
                 const figure = document.createElement('figure');
                 const img = document.createElement('img');
+                img.className = 'magnifiable';
                 img.src = p.photo_path;
                 img.alt = p.camera_name || 'Fotka kamery';
                 const figcaption = document.createElement('figcaption');
@@ -232,6 +314,7 @@
                 figure.appendChild(img);
                 figure.appendChild(figcaption);
                 gallery.appendChild(figure);
+                attachMagnifier(img);
             });
 
             renderWeighingChart(data);
