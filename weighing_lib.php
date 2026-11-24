@@ -393,7 +393,11 @@ function parseScaleResponse(string $protocol, string $response, ?string &$errorM
 // souběžně se svým vlastním vysíláním - ověřeno jen čtení (RM), ne zápis
 // (SZ). Je potřeba otestovat na reálném zařízení (admin.html to umožní).
 function buildZeroCommand(string $protocol): ?string {
-    if ($protocol === 'it1_the' || $protocol === 'it1_continuous') {
+    // Jen 'it1_the' (Online mode, příkaz/odpověď) - v 'it1_continuous'
+    // terminál na příchozí příkazy vůbec nereaguje (jen dál posílá svůj
+    // continuous-output řádek), takže by appka vyhodnotila začátek téhle
+    // odpovědi ("S...") jako chybový kód - ověřeno na reálném zařízení.
+    if ($protocol === 'it1_the') {
         return '<SZ1>';
     }
     return null;
