@@ -571,6 +571,8 @@ VAHA_LIVE_WEIGHT_FILE=$APP_DIR/live_weight.txt
 VAHA_SCALE_RAW_FILE=$APP_DIR/scale_raw.txt
 VAHA_FORCE_SAVE_FLAG=$APP_DIR/force_save.flag
 VAHA_DRIVER_SAVE_LAST_FILE=$APP_DIR/driver_save_last.txt
+VAHA_ZERO_REQUEST_FLAG=$APP_DIR/zero_request.flag
+VAHA_ZERO_RESULT_FILE=$APP_DIR/zero_result.json
 EOF
 chown root:www-data /etc/vaha/vaha.env
 chmod 640 /etc/vaha/vaha.env

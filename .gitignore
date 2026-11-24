@@ -4,6 +4,8 @@ live_weight.txt
 scale_raw.txt
 force_save.flag
 driver_save_last.txt
+zero_request.flag
+zero_result.json
 spz.jpg
 test_fotka.jpg
 photos/

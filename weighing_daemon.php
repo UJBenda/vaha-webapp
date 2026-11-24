@@ -106,6 +106,33 @@ while (true) {
             file_put_contents($config['scale_raw_file'], $rawResponse);
         }
 
+        // Vynulování váhy na dálku (Set Zero) z administrace - viz
+        // sendZeroCommand()/admin_api.php akce 'zero_scale'. Používá se
+        // STEJNÉ (již navázané) spojení s váhou jako běžné čtení, protože
+        // druhé souběžné TCP spojení k převodníku u leckterého hardwaru
+        // nejde navázat. Výsledek se vrátí přes zero_result_file, token
+        // v obou souborech spáruje konkrétní požadavek s odpovědí.
+        if (file_exists($config['zero_request_flag'])) {
+            $zeroToken = trim((string)@file_get_contents($config['zero_request_flag']));
+            @unlink($config['zero_request_flag']);
+            echo "Požadavek na vynulování váhy (Set Zero, token $zeroToken)...\n";
+
+            $zeroRaw = null;
+            $zeroError = null;
+            $zeroOk = sendZeroCommand($socket, $scale_protocol, $zeroRaw, $zeroError);
+            echo $zeroOk ? "Váha vynulována.\n" : "Vynulování selhalo: $zeroError\n";
+
+            file_put_contents($config['zero_result_file'], json_encode([
+                'token' => $zeroToken,
+                'ok' => $zeroOk,
+                'raw' => $zeroRaw,
+                'error' => $zeroError,
+            ]));
+
+            sleep($poll_interval_sec);
+            continue;
+        }
+
         // Ruční tlačítko u váhy (force_save.php) nebo tlačítko "Vážení
         // řidič" na dashboardu (driver_save.php) - uložit okamžitě, bez
         // ohledu na stav automatiky, a nečekat na stabilizaci. Obsah

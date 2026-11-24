@@ -380,6 +380,70 @@ function parseScaleResponse(string $protocol, string $response, ?string &$errorM
     return parseGenericCsvResponse($response, $errorMessage);
 }
 
+// ----- Vynulování váhy na dálku (Set Zero) -----
+//
+// Podporováno jen pro terminály SysTec IT1 (oba varianty - "Online mode" i
+// "Continuous output" sdílí stejnou sadu příkazů "<xx>" podle kap. 18 mimo
+// samotné pravidelné čtení váhy). "Set Zero" (SZ) přenastaví nulu váhy -
+// appka netáruje (viz výše u 'it1_the'), takže tohle je jediná relevantní
+// "nulovací" operace, ne "Automatic Tare" (TA), která by zavedla tárování.
+//
+// POZOR: u reálného terminálu nastaveného na "Continuous Output" není z
+// manuálu jisté, jestli v tomhle režimu vůbec zpracovává příchozí příkazy
+// souběžně se svým vlastním vysíláním - ověřeno jen čtení (RM), ne zápis
+// (SZ). Je potřeba otestovat na reálném zařízení (admin.html to umožní).
+function buildZeroCommand(string $protocol): ?string {
+    if ($protocol === 'it1_the' || $protocol === 'it1_continuous') {
+        return '<SZ1>';
+    }
+    return null;
+}
+
+function parseZeroResponse(string $response, ?string &$errorMessage = null): bool {
+    $content = trim($response);
+    if ($content !== '' && $content[0] === '<') {
+        $content = substr($content, 1);
+    }
+    $gtPos = strpos($content, '>');
+    if ($gtPos !== false) {
+        $content = substr($content, 0, $gtPos);
+    }
+
+    if (strlen($content) < 2) {
+        $errorMessage = "Odpověď je příliš krátká na chybový kód (viz Technical Manual IT1 kap. 18.6): '$content'";
+        return false;
+    }
+
+    $code = substr($content, 0, 2);
+    if ($code === '00') {
+        return true;
+    }
+
+    $errorMessage = "Váha vrátila chybu $code: " . (IT1_THE_ERROR_CODES[$code] ?? 'neznámý kód');
+    return false;
+}
+
+// Pošle Set Zero na JIŽ OTEVŘENÉM socketu (weighing_daemon.php má s váhou
+// navázané jediné spojení, otevírat druhé by u mnohých RS232/LAN
+// převodníků selhalo - viz scale_relay.php).
+function sendZeroCommand($socket, string $protocol, ?string &$rawOut = null, ?string &$errorMessage = null): bool {
+    $command = buildZeroCommand($protocol);
+    if ($command === null) {
+        $errorMessage = "Protokol '$protocol' nepodporuje vynulování na dálku.";
+        return false;
+    }
+
+    socket_write($socket, $command, strlen($command));
+    $response = socket_read($socket, 1024);
+    if ($response === false) {
+        $errorMessage = 'Váha neodpověděla (spojení selhalo).';
+        return false;
+    }
+
+    $rawOut = trim($response);
+    return parseZeroResponse($rawOut, $errorMessage);
+}
+
 // ----- Aktivně vybraná váha (Administrace > Váhy) -----
 // weighing_daemon.php sleduje vždy jen jednu váhu - tu s active = true.
 // Pokud žádná není nastavená (čistá instalace, admin ještě nic nepřidal),

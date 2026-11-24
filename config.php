@@ -109,4 +109,13 @@ return [
     // řidič" - driver_save.php podle něj hlídá cooldown
     // (driver_save_cooldown_sec v app_settings).
     'driver_save_last_file' => vahaEnv('VAHA_DRIVER_SAVE_LAST_FILE', '/var/www/vaha/driver_save_last.txt'),
+
+    // Vynulování váhy (Set Zero) na dálku z administrace - admin_api.php
+    // založí zero_request_flag (s tokenem), weighing_daemon.php ho při
+    // nejbližším cyklu zpracuje na svém JIŽ navázaném spojení s váhou
+    // (druhé současné TCP spojení k převodníku většinou nejde, viz
+    // scale_relay.php) a výsledek zapíše do zero_result_file. Stejný
+    // princip jako force_save_flag, jen obousměrně.
+    'zero_request_flag' => vahaEnv('VAHA_ZERO_REQUEST_FLAG', '/var/www/vaha/zero_request.flag'),
+    'zero_result_file' => vahaEnv('VAHA_ZERO_RESULT_FILE', '/var/www/vaha/zero_result.json'),
 ];

@@ -272,6 +272,8 @@
                 </tbody>
             </table>
             <button id="add-scale-button">+ Přidat váhu</button>
+            <button class="secondary" id="zero-scale-button">Vynulovat aktivní váhu (Set Zero)</button>
+            <p class="hint">Jen pro SysTec IT1 - vyžaduje prázdnou plošinu, jinak se nula nastaví špatně. Odešle se přes běžící weighing_daemon.php (čeká se na odpověď, může to trvat pár vteřin).</p>
 
             <div id="scale-form-wrap" style="display:none; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
                 <h2 id="scale-form-title">Nová váha</h2>
@@ -853,6 +855,28 @@
                 `;
             }
         }
+
+        document.getElementById('zero-scale-button').addEventListener('click', async () => {
+            if (!confirm('Opravdu vynulovat aktivní váhu (Set Zero)? Ujisti se, že je plošina prázdná - jinak se nula nastaví špatně.')) {
+                return;
+            }
+            document.getElementById('test-modal-title').textContent = 'Vynulování váhy (Set Zero)';
+            testModal.style.display = 'flex';
+            testModalContent.innerHTML = '<p>⏳ Posílám příkaz na vynulování... (čeká se na odpověď přes běžící weighing_daemon.php, může trvat pár vteřin)</p>';
+
+            const { data } = await api('zero_scale');
+            if (data.ok) {
+                testModalContent.innerHTML = `
+                    <p style="color:#137333;"><strong>Váha byla úspěšně vynulována.</strong></p>
+                    ${data.raw ? `<div class="hint">Syrová odpověď váhy:</div><pre>${escapeHtml(data.raw)}</pre>` : ''}
+                `;
+            } else {
+                testModalContent.innerHTML = `
+                    <p class="error">${escapeHtml(data.error || 'Vynulování selhalo')}</p>
+                    ${data.raw ? `<div class="hint">Syrová odpověď váhy:</div><pre>${escapeHtml(data.raw)}</pre>` : ''}
+                `;
+            }
+        });
 
         // ----- Start: zjistit, jestli je uživatel už přihlášený -----
         (async () => {
