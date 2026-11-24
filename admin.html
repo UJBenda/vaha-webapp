@@ -144,6 +144,7 @@
             <button class="tab-button" data-tab="templates">Šablony kamer</button>
             <button class="tab-button" data-tab="settings">Nastavení váhy</button>
             <button class="tab-button" data-tab="scales">Váhy</button>
+            <button class="tab-button" data-tab="password">Heslo</button>
         </div>
 
         <!-- Kamery -->
@@ -317,6 +318,25 @@
                     </div>
                 </form>
             </div>
+        </div>
+
+        <!-- Heslo -->
+        <div class="panel" id="panel-password">
+            <h2>Heslo administrace</h2>
+            <p class="hint">Platí pro přihlášení do téhle administrace (admin.html) - nemá vliv na nic jiného.</p>
+            <form id="password-form" style="max-width: 400px;">
+                <label for="password-current">Současné heslo</label>
+                <input type="password" id="password-current" required>
+                <label for="password-new">Nové heslo</label>
+                <input type="password" id="password-new" required minlength="8">
+                <label for="password-confirm">Nové heslo znovu</label>
+                <input type="password" id="password-confirm" required minlength="8">
+                <div id="password-form-error" class="error"></div>
+                <div id="password-form-success" class="hint" style="color:#137333;"></div>
+                <div style="margin-top: 16px;">
+                    <button type="submit">Změnit heslo</button>
+                </div>
+            </form>
         </div>
 
         <!-- Šablony -->
@@ -895,6 +915,32 @@
                     ${data.raw ? `<div class="hint">Syrová odpověď váhy:</div><pre>${escapeHtml(data.raw)}</pre>` : ''}
                 `;
             }
+        });
+
+        // ----- Heslo administrace -----
+        document.getElementById('password-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('password-form-error');
+            const successEl = document.getElementById('password-form-success');
+            errorEl.textContent = '';
+            successEl.textContent = '';
+
+            const currentPassword = document.getElementById('password-current').value;
+            const newPassword = document.getElementById('password-new').value;
+            const confirmPassword = document.getElementById('password-confirm').value;
+
+            if (newPassword !== confirmPassword) {
+                errorEl.textContent = 'Nové heslo a jeho potvrzení se neshodují';
+                return;
+            }
+
+            const { data } = await api('change_password', { current_password: currentPassword, new_password: newPassword });
+            if (!data.ok) {
+                errorEl.textContent = data.error || 'Změna hesla selhala';
+                return;
+            }
+            successEl.textContent = '✓ Heslo bylo změněno';
+            document.getElementById('password-form').reset();
         });
 
         // ----- Start: zjistit, jestli je uživatel už přihlášený -----

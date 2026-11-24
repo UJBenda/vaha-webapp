@@ -1,6 +1,9 @@
 <?php
 // Backend pro admin.html - přihlášení + CRUD nad "cameras" a "camera_templates".
-// Autentizace: jedno sdílené heslo (VAHA_ADMIN_PASSWORD) + PHP session.
+// Autentizace: jedno sdílené heslo + PHP session. Heslo (hash, password_hash())
+// žije v app_settings['admin_password_hash'] - VAHA_ADMIN_PASSWORD ve
+// vaha.env je jen prvotní/záložní heslo pro čistě novou instalaci, při
+// prvním úspěšném přihlášení se automaticky migruje do DB (viz checkAdminPassword()).
 // Apache navíc omezuje přístup k celé appce podle IP (viz vaha.conf).
 
 session_set_cookie_params(['samesite' => 'Strict']);
@@ -19,15 +22,56 @@ function respond($data, int $code = 200): never {
     exit;
 }
 
+// app_settings klíče spravované vlastními akcemi (heslo, nastavení zálohy) -
+// nikdy se nesmí objevit/dát přepsat přes obecný list_settings/save_settings
+// (záložka "Nastavení váhy").
+const APP_SETTINGS_INTERNAL_KEYS = ['admin_password_hash', 'backup_retention_count'];
+
 $rawInput = json_decode(file_get_contents('php://input'), true);
 $input = is_array($rawInput) ? $rawInput : [];
 $action = $_GET['action'] ?? $input['action'] ?? '';
 
-// ----- Přihlášení / odhlášení (bez potřeby DB) -----
+try {
+    $db = $config['db'];
+    $dsn = "pgsql:host={$db['host']};port={$db['port']};dbname={$db['name']}";
+    $pdo = new PDO($dsn, $db['user'], $db['pass']);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+} catch (PDOException $e) {
+    respond(['ok' => false, 'error' => 'DB chyba: ' . $e->getMessage()], 500);
+}
+
+// Ověří heslo proti hashi v DB; pokud tam ještě žádný není (čerstvá
+// instalace nebo appka ještě před touhle funkcí), porovná proti
+// VAHA_ADMIN_PASSWORD z vaha.env a při shodě rovnou DB hashem osadí, ať se
+// od příští chvíle používá jen ten.
+function checkAdminPassword(PDO $pdo, array $config, string $password): bool {
+    if ($password === '') {
+        return false;
+    }
+    $hash = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'admin_password_hash'")->fetchColumn();
+    if ($hash) {
+        return password_verify($password, $hash);
+    }
+    if (!hash_equals($config['admin_password'], $password)) {
+        return false;
+    }
+    setAdminPasswordHash($pdo, $password);
+    return true;
+}
+
+function setAdminPasswordHash(PDO $pdo, string $password): void {
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    $pdo->prepare(
+        "INSERT INTO app_settings (setting_key, setting_value, description) VALUES ('admin_password_hash', ?, 'Hash hesla administrace (bcrypt) - spravuje se přes Administrace > Heslo, ne ručně')
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value"
+    )->execute([$hash]);
+}
+
+// ----- Přihlášení / odhlášení -----
 
 if ($action === 'login') {
     $password = (string)($input['password'] ?? '');
-    if ($password !== '' && hash_equals($config['admin_password'], $password)) {
+    if (checkAdminPassword($pdo, $config, $password)) {
         $_SESSION['admin_ok'] = true;
         respond(['ok' => true]);
     }
@@ -49,15 +93,6 @@ if (empty($_SESSION['admin_ok'])) {
 }
 
 // ----- Vše pod touto čárou vyžaduje přihlášení -----
-
-try {
-    $db = $config['db'];
-    $dsn = "pgsql:host={$db['host']};port={$db['port']};dbname={$db['name']}";
-    $pdo = new PDO($dsn, $db['user'], $db['pass']);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    respond(['ok' => false, 'error' => 'DB chyba: ' . $e->getMessage()], 500);
-}
 
 switch ($action) {
 
@@ -238,7 +273,9 @@ switch ($action) {
             }
         }
 
-        $items = $pdo->query('SELECT * FROM app_settings ORDER BY setting_key')->fetchAll(PDO::FETCH_ASSOC);
+        $items = $pdo->query(
+            "SELECT * FROM app_settings WHERE setting_key NOT IN ('" . implode("','", APP_SETTINGS_INTERNAL_KEYS) . "') ORDER BY setting_key"
+        )->fetchAll(PDO::FETCH_ASSOC);
         respond(['ok' => true, 'items' => $items]);
     }
 
@@ -249,8 +286,31 @@ switch ($action) {
         }
         $update = $pdo->prepare('UPDATE app_settings SET setting_value = ? WHERE setting_key = ?');
         foreach ($settings as $key => $value) {
+            // app_settings se dvojitě používá i pro interní hodnoty (hash hesla,
+            // nastavení zálohy) spravované vlastními akcemi - obecný formulář
+            // "Nastavení váhy" je nesmí nikdy umět přepsat.
+            if (in_array((string)$key, APP_SETTINGS_INTERNAL_KEYS, true)) {
+                continue;
+            }
             $update->execute([(string)$value, (string)$key]);
         }
+        respond(['ok' => true]);
+    }
+
+    // ----- Heslo administrace -----
+
+    case 'change_password': {
+        $currentPassword = (string)($input['current_password'] ?? '');
+        $newPassword = (string)($input['new_password'] ?? '');
+
+        if (!checkAdminPassword($pdo, $config, $currentPassword)) {
+            respond(['ok' => false, 'error' => 'Současné heslo není správně'], 403);
+        }
+        if (mb_strlen($newPassword) < 8) {
+            respond(['ok' => false, 'error' => 'Nové heslo musí mít alespoň 8 znaků'], 400);
+        }
+
+        setAdminPasswordHash($pdo, $newPassword);
         respond(['ok' => true]);
     }
 
