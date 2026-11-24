@@ -386,7 +386,7 @@ info "Instaluji systémové balíčky (chvíli to potrvá)..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 
-PACKAGES=(apache2 php php-cli php-pgsql ffmpeg python3 python3-pip python3-venv git curl rsync cron openssl ca-certificates gnupg)
+PACKAGES=(apache2 php php-cli php-pgsql php-curl ffmpeg python3 python3-pip python3-venv git curl rsync cron openssl ca-certificates gnupg)
 if [ "$DB_IS_LOCAL" -eq 1 ]; then
     PACKAGES+=(postgresql postgresql-contrib)
 fi
