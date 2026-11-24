@@ -594,10 +594,22 @@ if [ "$USE_HTTPS" -eq 1 ]; then
         selfsigned)
             info "Generuji self-signed certifikát..."
             mkdir -p /etc/ssl/vaha
+            # "openssl req -x509" bez explicitních extensions vygeneruje
+            # certifikát se BasicConstraints CA:TRUE (jako by šlo o kořenovou
+            # CA, ne o běžný serverový/leaf certifikát) a bez SAN - moderní
+            # prohlížeče takový certifikát pro TLS server nepřijmou vůbec
+            # (ne jen jako "nedůvěryhodný" s možností výjimky, ale jako
+            # neplatný), typicky s nepopisnou chybou "NetworkError" u
+            # fetch()/XHR požadavků i když se hlavní stránka načte.
             openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout /etc/ssl/vaha/privkey.pem \
                 -out /etc/ssl/vaha/fullchain.pem \
-                -subj "/CN=$HOSTNAME" >/dev/null 2>&1
+                -subj "/CN=$HOSTNAME" \
+                -addext "subjectAltName=DNS:$HOSTNAME" \
+                -addext "basicConstraints=critical,CA:FALSE" \
+                -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+                -addext "extendedKeyUsage=serverAuth" \
+                >/dev/null 2>&1
             SSL_CERT_PATH=/etc/ssl/vaha/fullchain.pem
             SSL_KEY_PATH=/etc/ssl/vaha/privkey.pem
             warn "Self-signed certifikát - prohlížeče ho budou hlásit jako nedůvěryhodný, dokud ho ručně nepřidáš mezi výjimky/důvěryhodné kořeny."
