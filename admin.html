@@ -277,7 +277,7 @@
             </table>
             <button id="add-scale-button">+ Přidat váhu</button>
             <button class="secondary" id="zero-scale-button">Vynulovat aktivní váhu (Set Zero)</button>
-            <p class="hint">Jen pro SysTec IT1 - vyžaduje prázdnou plošinu, jinak se nula nastaví špatně. Odešle se přes běžící weighing_daemon.php (čeká se na odpověď, může to trvat pár vteřin).</p>
+            <p class="hint">Jen pro SysTec IT1. Terminál sám odmítne vynulování mimo svůj nastavený "zero range" (viz Service Mode). Odešle se přes běžící weighing_daemon.php (čeká se na odpověď, může to trvat pár vteřin).</p>
 
             <div id="scale-form-wrap" style="display:none; margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
                 <h2 id="scale-form-title">Nová váha</h2>
@@ -868,7 +868,7 @@
         }
 
         document.getElementById('zero-scale-button').addEventListener('click', async () => {
-            if (!confirm('Opravdu vynulovat aktivní váhu (Set Zero)? Ujisti se, že je plošina prázdná - jinak se nula nastaví špatně.')) {
+            if (!confirm('Opravdu vynulovat aktivní váhu (Set Zero)?')) {
                 return;
             }
             document.getElementById('test-modal-title').textContent = 'Vynulování váhy (Set Zero)';

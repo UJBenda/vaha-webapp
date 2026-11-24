@@ -448,9 +448,13 @@ function sendZeroCommand($socket, string $protocol, ?string &$rawOut = null, ?st
 // zero_scale.php na dashboardu) - appka se k váze sama nepřipojuje (druhé
 // souběžné TCP spojení by u leckterého převodníku kolidovalo s tím, co drží
 // weighing_daemon.php), místo toho založí příznak, který démon vyzvedne při
-// svém příštím cyklu na SVÉM spojení, a čeká (až 10s) na výsledek. Než se
-// o to vůbec pokusí, ověří, že je plošina prázdná - vynulování s nákladem
-// na váze by nastavilo špatnou nulu.
+// svém příštím cyklu na SVÉM spojení, a čeká (až 10s) na výsledek.
+//
+// Appka sama žádnou podmínku "plošina musí být prázdná" nekontroluje -
+// terminál IT1 má vlastní "zero range" (Technical Manual IT1 kap. 18.6),
+// mimo který SZ sám odmítne s chybou 15 (viz IT1_THE_ERROR_CODES). To je
+// žádoucí i legitimní použití: vynulování kompenzuje sníh/nečistoty na
+// plošině nebo drift kalibrace, ne jen prázdnou váhu ukazující přesně 0.
 function requestZeroScale(PDO $pdo, array $config): array {
     $scale = $pdo->query('SELECT protocol FROM scales WHERE active = true LIMIT 1')->fetch(PDO::FETCH_ASSOC);
     if (!$scale) {
@@ -458,15 +462,6 @@ function requestZeroScale(PDO $pdo, array $config): array {
     }
     if (buildZeroCommand($scale['protocol']) === null) {
         return ['ok' => false, 'error' => 'Aktivní protokol vynulování na dálku nepodporuje'];
-    }
-
-    $settings = loadSettings($pdo, ['departure_empty_kg' => 50]);
-    $currentWeight = getCurrentWeight($config);
-    if ($currentWeight !== null && abs($currentWeight) > $settings['departure_empty_kg']) {
-        return [
-            'ok' => false,
-            'error' => "Plošina není prázdná (aktuálně {$currentWeight} kg) - vynulování odmítnuto, aby se nenastavila špatná nula.",
-        ];
     }
 
     $token = bin2hex(random_bytes(8));

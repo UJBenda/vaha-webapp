@@ -304,7 +304,7 @@
             <div class="section-header">
                 <h2>Aktuální váha</h2>
                 <div style="display: flex; gap: 8px;">
-                    <button id="zero-scale-button" title="Jen pro prázdnou plošinu">
+                    <button id="zero-scale-button" title="Set Zero - vynuluje váhu (jen SysTec IT1)">
                         <span id="zero-scale-spinner"></span>
                         <span id="zero-scale-label">Vynulovat váhu</span>
                     </button>
@@ -636,7 +636,7 @@
         const zeroScaleStatus = document.getElementById('zero-scale-status');
 
         zeroScaleButton.addEventListener('click', async () => {
-            if (!confirm('Opravdu vynulovat váhu (Set Zero)? Ujisti se, že je plošina úplně prázdná - jinak se nastaví špatná nula.')) {
+            if (!confirm('Opravdu vynulovat váhu (Set Zero)?')) {
                 return;
             }
             zeroScaleButton.disabled = true;
