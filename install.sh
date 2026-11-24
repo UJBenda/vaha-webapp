@@ -830,6 +830,18 @@ authInternalUsers:
 
 webrtc: yes
 webrtcAddress: :8889
+# Bez tohohle MediaMTX nabízí klientům jen IP svých lokálních síťových
+# rozhraní (kvůli "network_mode: host" v docker-compose.yml) - remote
+# prohlížeč přes internet/jinou síť by se pak nikdy nedostal přes NAT
+# k samotnému mediovému (UDP/ICE) spojení a WebRTC by "viselo" na
+# "deadline exceeded while waiting connection", i když signalizace
+# (WHEP) projde v pohodě. $HOSTNAME je veřejně dostupná doména appky,
+# kterou appka stejně potřebuje pro HTTPS - funguje jen pokud na ni
+# DNS skutečně ukazuje na tenhle server A je navenek propustný UDP
+# port 8189 (webrtcAddress výše); jinak uprav ručně na skutečnou
+# veřejnou IP/doménu a zkontroluj port forwarding na routeru/firewallu.
+webrtcAdditionalHosts:
+  - $HOSTNAME
 
 paths:
   all_others:
