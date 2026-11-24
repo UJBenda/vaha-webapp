@@ -145,6 +145,7 @@
             <button class="tab-button" data-tab="settings">Nastavení váhy</button>
             <button class="tab-button" data-tab="scales">Váhy</button>
             <button class="tab-button" data-tab="password">Heslo</button>
+            <button class="tab-button" data-tab="backups">Zálohy</button>
         </div>
 
         <!-- Kamery -->
@@ -339,6 +340,42 @@
             </form>
         </div>
 
+        <!-- Zálohy -->
+        <div class="panel" id="panel-backups">
+            <h2>Zálohy</h2>
+            <p class="hint">
+                Záloha obsahuje databázi, adresář appky (vč. fotek, bez <code>.git</code>) a
+                <code>/etc/vaha/vaha.env</code>. Noční záloha běží v 02:15 (pokud byla zapnutá
+                při instalaci) - tady jen nastavuješ, kolik posledních se má uchovat.
+            </p>
+            <div class="form-grid" style="max-width: 500px;">
+                <div>
+                    <label for="backup-retention">Počet uchovaných záloh</label>
+                    <input type="text" id="backup-retention" placeholder="např. 7">
+                </div>
+            </div>
+            <div id="backup-settings-error" class="error"></div>
+            <div style="margin-top: 16px;">
+                <button id="backup-settings-save">Uložit</button>
+                <button class="secondary" id="backup-run-now">Spustit zálohu teď</button>
+            </div>
+            <div id="backup-run-status" class="hint"></div>
+
+            <h2 style="margin-top: 32px;">Existující zálohy</h2>
+            <table id="backups-table">
+                <thead>
+                    <tr>
+                        <th>Název</th>
+                        <th>Velikost</th>
+                        <th>Vytvořeno</th>
+                    </tr>
+                </thead>
+                <tbody id="backups-body">
+                    <tr><td colspan="3">Načítání...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
         <!-- Šablony -->
         <div class="panel" id="panel-templates">
             <h2>Šablony kamer</h2>
@@ -432,6 +469,7 @@
             loadTemplates().then(loadCameras);
             loadSettings();
             loadScales();
+            loadBackups();
         }
 
         document.getElementById('login-button').addEventListener('click', doLogin);
@@ -941,6 +979,63 @@
             }
             successEl.textContent = '✓ Heslo bylo změněno';
             document.getElementById('password-form').reset();
+        });
+
+        // ----- Zálohy -----
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+            return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+
+        async function loadBackups() {
+            const { data } = await api('list_backups');
+            if (!data.ok) return;
+
+            document.getElementById('backup-retention').value = data.retention_count;
+
+            const body = document.getElementById('backups-body');
+            body.innerHTML = '';
+            if (data.items.length === 0) {
+                body.innerHTML = '<tr><td colspan="3">Zatím žádné zálohy</td></tr>';
+            }
+            data.items.forEach(b => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${escapeHtml(b.name)}</td>
+                    <td>${formatBytes(b.size_bytes)}</td>
+                    <td>${escapeHtml(b.modified_at)}</td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        document.getElementById('backup-settings-save').addEventListener('click', async () => {
+            const errorEl = document.getElementById('backup-settings-error');
+            errorEl.textContent = '';
+            const retention = document.getElementById('backup-retention').value;
+            const { data } = await api('save_backup_retention', { retention_count: retention });
+            if (!data.ok) {
+                errorEl.textContent = data.error || 'Uložení selhalo';
+                return;
+            }
+            await loadBackups();
+        });
+
+        document.getElementById('backup-run-now').addEventListener('click', async () => {
+            const statusEl = document.getElementById('backup-run-status');
+            const errorEl = document.getElementById('backup-settings-error');
+            errorEl.textContent = '';
+            statusEl.textContent = 'Spouštím zálohu na pozadí...';
+            const { data } = await api('run_backup_now');
+            if (!data.ok) {
+                statusEl.textContent = '';
+                errorEl.textContent = data.error || 'Spuštění selhalo';
+                return;
+            }
+            statusEl.textContent = 'Záloha běží na pozadí (může trvat několik minut podle velikosti fotek) - obnov tabulku níže později.';
+            setTimeout(loadBackups, 10000);
         });
 
         // ----- Start: zjistit, jestli je uživatel už přihlášený -----

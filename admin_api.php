@@ -314,6 +314,57 @@ switch ($action) {
         respond(['ok' => true]);
     }
 
+    // ----- Zálohy (noční cron i ruční spuštění - viz /usr/local/bin/vaha-backup-full.sh) -----
+
+    case 'list_backups': {
+        $backupRoot = '/var/backups/vaha';
+        $items = [];
+        foreach (glob($backupRoot . '/vaha-backup-*', GLOB_ONLYDIR) ?: [] as $dir) {
+            $sizeBytes = 0;
+            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)) as $file) {
+                $sizeBytes += $file->getSize();
+            }
+            $items[] = [
+                'name' => basename($dir),
+                'size_bytes' => $sizeBytes,
+                'modified_at' => date('Y-m-d H:i:s', filemtime($dir)),
+            ];
+        }
+        usort($items, fn($a, $b) => strcmp($b['name'], $a['name']));
+
+        $retention = $pdo->query("SELECT setting_value FROM app_settings WHERE setting_key = 'backup_retention_count'")->fetchColumn();
+        respond(['ok' => true, 'items' => $items, 'retention_count' => $retention !== false ? (int)$retention : 7]);
+    }
+
+    case 'save_backup_retention': {
+        $retention = (int)($input['retention_count'] ?? 0);
+        if ($retention < 1 || $retention > 365) {
+            respond(['ok' => false, 'error' => 'Počet uchovaných záloh musí být 1-365'], 400);
+        }
+        $pdo->prepare(
+            "INSERT INTO app_settings (setting_key, setting_value, description) VALUES ('backup_retention_count', ?, 'Kolik posledních záloh uchovat (viz Administrace > Zálohy) - starší se při každém běhu zálohy smažou')
+             ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value"
+        )->execute([(string)$retention]);
+        respond(['ok' => true]);
+    }
+
+    case 'run_backup_now': {
+        $script = '/usr/local/bin/vaha-backup-full.sh';
+        if (!is_executable($script)) {
+            respond(['ok' => false, 'error' => "Záložní skript $script neexistuje nebo není spustitelný - nastav nejdřív noční zálohu v install.sh (nebo ho spusť znovu)."], 400);
+        }
+        // Běží na pozadí - plná záloha (DB + appka) může trvat déle, než je
+        // rozumné čekat v jednom HTTP požadavku. Výsledek se objeví v
+        // list_backups, až doběhne.
+        // Log jde do /var/backups/vaha (ne /var/log) - ten je root:www-data
+        // 2770, takže tam může zapisovat jak www-data (tohle tlačítko), tak
+        // root (noční cron); /var/log je root:root 755 a www-data by do něj
+        // nový soubor nevytvořil (exec() na pozadí by to selhání potichu
+        // spolknul).
+        exec(escapeshellarg($script) . ' > /var/backups/vaha/manual-run.log 2>&1 &');
+        respond(['ok' => true]);
+    }
+
     // ----- Váhy (IP/port/protokol terminálu - viz weighing_lib.php) -----
 
     case 'list_scales': {

@@ -348,7 +348,7 @@ else
 fi
 
 SETUP_BACKUP_CRON=0
-if ask_yn "Nastavit noční automatickou zálohu databáze (cron, pg_dump do /var/backups/vaha)?" "y"; then
+if ask_yn "Nastavit noční automatickou zálohu (DB + appka + konfigurace, do /var/backups/vaha, s rotací podle nastavení v administraci)?" "y"; then
     SETUP_BACKUP_CRON=1
 fi
 
@@ -370,7 +370,7 @@ else
 fi
 echo "  HTTPS:           $( [ "$USE_HTTPS" -eq 1 ] && echo "ano ($SSL_MODE)" || echo 'ne (jen port 80)')"
 echo "  Časová zóna:     $( [ "$SET_TIMEZONE" -eq 1 ] && echo 'Europe/Prague' || echo 'beze změny')"
-echo "  Záloha DB (cron):$( [ "$SETUP_BACKUP_CRON" -eq 1 ] && echo ' ano' || echo ' ne')"
+echo "  Noční záloha:    $( [ "$SETUP_BACKUP_CRON" -eq 1 ] && echo 'ano (DB + appka + konfigurace, rotace v administraci)' || echo 'ne')"
 echo "  Firewall (ufw):  $( [ "$SETUP_UFW" -eq 1 ] && echo 'ano' || echo 'ne')"
 echo
 if ! ask_yn "Pokračovat s instalací?" "y"; then
@@ -781,35 +781,53 @@ CRON_LINE="* * * * * php $APP_DIR/sync_cameras.php >> /var/log/vaha-sync-cameras
 ok "cron nastaven."
 
 if [ "$SETUP_BACKUP_CRON" -eq 1 ]; then
-    info "Nastavuji noční zálohu databáze..."
+    info "Nastavuji noční zálohu (DB + appka + konfigurace)..."
     mkdir -p /var/backups/vaha
-    # Při lokální DB běží pg_dump v cronu pod uživatelem postgres (viz níž) -
-    # výchozí root:root 0755 by mu zápis do adresáře nedovolilo.
-    chown root:postgres /var/backups/vaha 2>/dev/null || true
-    chmod 770 /var/backups/vaha
-    cat > /usr/local/bin/vaha-backup-db.sh <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-STAMP=\$(date +%Y%m%d)
-EOF
+    # setgid: nově vytvořené podadresáře zdědí skupinu www-data, aby do nich
+    # mohl zapisovat jak root (noční cron), tak www-data (tlačítko "Spustit
+    # zálohu teď" v administraci - viz run_backup_now v admin_api.php).
+    chown root:www-data /var/backups/vaha 2>/dev/null || true
+    chmod 2770 /var/backups/vaha
+
+    # pg_dump vždy přes TCP + heslo (stejně jako appka samotná v config.php),
+    # nikdy přes "runuser -u postgres" - ten vyžaduje root, a skript musí jít
+    # spustit i jako www-data (tlačítko v administraci), ne jen z cronu.
+    # DB_HOST_FOR_BACKUP: "localhost" by přes unix socket zkusil peer/ident
+    # autentizaci (žádné heslo) jen pro OS uživatele postgres/root - 127.0.0.1
+    # vynutí TCP, kde funguje přihlášení jménem/heslem pro kohokoliv (stejně
+    # jako se appka sama k lokální DB připojuje).
+    DB_HOST_FOR_BACKUP="$DB_HOST"
     if [ "$DB_IS_LOCAL" -eq 1 ]; then
-        cat >> /usr/local/bin/vaha-backup-db.sh <<EOF
-runuser -u postgres -- pg_dump -d "$DB_NAME" -F c -f "/var/backups/vaha/vaha-\$STAMP.dump"
-EOF
-    else
-        # printf %q zajistí, že heslo je ve vygenerovaném skriptu bezpečně
-        # escapované, i kdyby obsahovalo uvozovky nebo jiné speciální znaky.
-        DB_PASS_SHELL_QUOTED=$(printf '%q' "$DB_PASS")
-        cat >> /usr/local/bin/vaha-backup-db.sh <<EOF
-PGPASSWORD=$DB_PASS_SHELL_QUOTED pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -F c -f "/var/backups/vaha/vaha-\$STAMP.dump"
-EOF
+        DB_HOST_FOR_BACKUP="127.0.0.1"
     fi
-    cat >> /usr/local/bin/vaha-backup-db.sh <<'EOF'
-find /var/backups/vaha -name "vaha-*.dump" -mtime +30 -delete
+    # printf %q zajistí, že heslo je ve vygenerovaném skriptu bezpečně
+    # escapované, i kdyby obsahovalo uvozovky nebo jiné speciální znaky.
+    # Skript čte i config.php (přes vaha.env), takže heslo tu není o nic
+    # citlivější než už beztak je - stejné heslo čte www-data i dnes.
+    DB_PASS_SHELL_QUOTED=$(printf '%q' "$DB_PASS")
+    cat > /usr/local/bin/vaha-backup-full.sh <<EOF
+#!/usr/bin/env bash
+# Generováno install.sh - noční (nebo ruční, z administrace) záloha DB +
+# appky + konfigurace do jednoho adresáře s časovým razítkem. Počet
+# uchovaných záloh (rotace) se nastavuje v Administraci > Zálohy
+# (app_settings.backup_retention_count), čte se znovu při každém běhu.
+set -euo pipefail
+STAMP=\$(date +%Y%m%d_%H%M%S)
+BACKUP_ROOT="/var/backups/vaha"
+BACKUP_DIR="\$BACKUP_ROOT/vaha-backup-\$STAMP"
+mkdir -p "\$BACKUP_DIR"
+PGPASSWORD=$DB_PASS_SHELL_QUOTED pg_dump -h "$DB_HOST_FOR_BACKUP" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -F c -f "\$BACKUP_DIR/db.dump"
+RETENTION=\$(PGPASSWORD=$DB_PASS_SHELL_QUOTED psql -h "$DB_HOST_FOR_BACKUP" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT setting_value FROM app_settings WHERE setting_key='backup_retention_count'" 2>/dev/null | tr -d '[:space:]' || true)
+case "\$RETENTION" in (''|*[!0-9]*) RETENTION=7 ;; esac
+tar czf "\$BACKUP_DIR/app.tar.gz" -C "$(dirname "$APP_DIR")" --exclude='.git' "$(basename "$APP_DIR")"
+cp /etc/vaha/vaha.env "\$BACKUP_DIR/vaha.env" 2>/dev/null || true
+ls -1dt "\$BACKUP_ROOT"/vaha-backup-* 2>/dev/null | tail -n +\$((RETENTION+1)) | xargs -r rm -rf
 EOF
-    chmod 700 /usr/local/bin/vaha-backup-db.sh
-    ( crontab -l 2>/dev/null | grep -vF "vaha-backup-db.sh" || true; echo "15 2 * * * /usr/local/bin/vaha-backup-db.sh" ) | crontab -
-    ok "Noční záloha nastavena (02:15, /var/backups/vaha, 30 dní historie)."
+    chown root:www-data /usr/local/bin/vaha-backup-full.sh
+    chmod 750 /usr/local/bin/vaha-backup-full.sh
+    ( crontab -l 2>/dev/null | grep -vF "vaha-backup-full.sh" | grep -vF "vaha-backup-db.sh" || true; echo "15 2 * * * /usr/local/bin/vaha-backup-full.sh" ) | crontab -
+    rm -f /usr/local/bin/vaha-backup-db.sh
+    ok "Noční záloha nastavena (02:15, /var/backups/vaha, počet uchovaných záloh viz Administrace > Zálohy)."
 fi
 
 # ===========================================================
@@ -922,8 +940,14 @@ if [ "$SETUP_UFW" -eq 1 ]; then
     if [ "$USE_HTTPS" -eq 1 ]; then
         ufw allow 443/tcp >/dev/null
     fi
+    # WebRTC/ICE (mediamtx webrtcAddress výše) - bez tohohle klienti dostanou
+    # "deadline exceeded while waiting connection", protože signalizace
+    # (přes Apache na 80/443) projde, ale mediové UDP spojení ne. Ověřeno
+    # na produkci - snadno se přehlédne, protože appka samotná (HTML/JSON)
+    # funguje normálně, jen video nikdy nenaskočí.
+    ufw allow 8189/udp >/dev/null
     ufw --force enable >/dev/null
-    ok "ufw zapnutý (SSH, 80$( [ "$USE_HTTPS" -eq 1 ] && echo ', 443' ))."
+    ok "ufw zapnutý (SSH, 80$( [ "$USE_HTTPS" -eq 1 ] && echo ', 443' ), 8189/udp pro WebRTC)."
 fi
 
 # ===========================================================
