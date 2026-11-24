@@ -408,6 +408,11 @@ if ! command -v docker &>/dev/null; then
 else
     ok "Docker už je nainstalovaný."
 fi
+# Instalační skript docker.com by službu měl sám zapnout, ale v praxi se
+# stávalo, že po restartu serveru docker (a tím pádem MediaMTX) nenaběhl -
+# proto enable/start explicitně, ať je to jisté bez ohledu na chování
+# instalačního skriptu nebo už dřív nainstalovanou verzi.
+systemctl enable --now docker >/dev/null 2>&1 || warn "Nepodařilo se zapnout/nastartovat službu docker - zkontroluj 'systemctl status docker'."
 
 a2enmod proxy proxy_http proxy_wstunnel rewrite headers >/dev/null
 if [ "$USE_HTTPS" -eq 1 ]; then
