@@ -493,7 +493,11 @@ CREATE TABLE IF NOT EXISTS cameras (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_weighing_photo BOOLEAN DEFAULT true,
     show_on_dashboard BOOLEAN DEFAULT false,
-    lpr_mode VARCHAR(10) NOT NULL DEFAULT 'off' CHECK (lpr_mode IN ('off','ocr','qr','both'))
+    lpr_mode VARCHAR(10) NOT NULL DEFAULT 'off' CHECK (lpr_mode IN ('off','ocr','qr','both')),
+    -- Číslo kanálu u kamer visících za NVR (víc kamer sdílí jednu IP, liší
+    -- se jen číslem kanálu v RTSP URL) - viz {channel} v šabloně, prázdné
+    -- pro kamery připojené přímo bez NVR.
+    channel VARCHAR(10) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS weighings (

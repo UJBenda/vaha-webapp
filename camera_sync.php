@@ -14,6 +14,12 @@
 // a kratší {ip}/{user}/{pass}, např.:
 //   rtsp://{username}:{password}@{ip_address}/stream1
 //   rtsp://{user}:{pass}@{ip}/stream1
+//
+// {channel} je pro kamery visící za NVR (víc kamer sdílí jednu IP NVR,
+// liší se jen číslem kanálu v cestě), např. u Dahua NVR:
+//   rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&subtype=0
+// (subtype=0 hlavní proud, subtype=1 substream). U kamer bez NVR se
+// {channel} v šabloně nepoužije a pole zůstává v DB prázdné.
 
 function mediamtxPathName(int $cameraId): string {
     return 'cam' . $cameraId;
@@ -21,8 +27,8 @@ function mediamtxPathName(int $cameraId): string {
 
 function resolveCameraSource(array $camera): string {
     return str_replace(
-        ['{ip_address}', '{username}', '{password}', '{ip}', '{user}', '{pass}'],
-        [$camera['ip_address'], $camera['username'], $camera['password'], $camera['ip_address'], $camera['username'], $camera['password']],
+        ['{ip_address}', '{username}', '{password}', '{ip}', '{user}', '{pass}', '{channel}'],
+        [$camera['ip_address'], $camera['username'], $camera['password'], $camera['ip_address'], $camera['username'], $camera['password'], $camera['channel'] ?? ''],
         $camera['url_template']
     );
 }
@@ -30,7 +36,7 @@ function resolveCameraSource(array $camera): string {
 function syncCameras(PDO $pdo): array {
     $log = [];
 
-    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, t.url_template
+    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.channel, t.url_template
             FROM cameras c
             JOIN camera_templates t ON t.id = c.template_id
             WHERE c.is_active = true";

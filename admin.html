@@ -188,6 +188,10 @@
                             <input type="text" id="camera-ip" placeholder="192.168.93.227" required>
                         </div>
                         <div>
+                            <label for="camera-channel">Kanál (jen pokud kamera visí za NVR)</label>
+                            <input type="text" id="camera-channel" placeholder="např. 6 - prázdné = kamera bez NVR">
+                        </div>
+                        <div>
                             <label for="camera-username">Uživatel</label>
                             <input type="text" id="camera-username" required>
                         </div>
@@ -319,6 +323,11 @@
                 <code>{ip_address}</code>, <code>{username}</code>, <code>{password}</code> se při
                 synchronizaci nahradí hodnotami z konkrétní kamery, např.
                 <code>rtsp://{username}:{password}@{ip_address}/stream1</code>.
+                Pro kamery za NVR (víc kamer sdílí jednu IP, liší se jen číslem
+                kanálu) použij navíc <code>{channel}</code> - číslo kanálu se
+                vyplňuje u konkrétní kamery, např. pro Dahua NVR:
+                <code>rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&amp;subtype=0</code>
+                (<code>subtype=0</code> hlavní proud, <code>subtype=1</code> substream).
             </p>
             <table id="templates-table">
                 <thead>
@@ -610,6 +619,7 @@
             document.getElementById('camera-name').value = c ? c.name : '';
             document.getElementById('camera-template').value = c ? c.template_id : (templatesCache[0] ? templatesCache[0].id : '');
             document.getElementById('camera-ip').value = c ? c.ip_address : '';
+            document.getElementById('camera-channel').value = c ? (c.channel || '') : '';
             document.getElementById('camera-username').value = c ? c.username : '';
             document.getElementById('camera-password').value = '';
             document.getElementById('camera-password-hint').textContent = c
@@ -633,6 +643,7 @@
                 name: document.getElementById('camera-name').value,
                 template_id: document.getElementById('camera-template').value,
                 ip_address: document.getElementById('camera-ip').value,
+                channel: document.getElementById('camera-channel').value,
                 username: document.getElementById('camera-username').value,
                 password: document.getElementById('camera-password').value,
                 is_active: document.getElementById('camera-active').checked,

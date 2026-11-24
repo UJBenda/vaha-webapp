@@ -75,6 +75,7 @@ switch ($action) {
         $ip = trim((string)($input['ip_address'] ?? ''));
         $username = trim((string)($input['username'] ?? ''));
         $password = (string)($input['password'] ?? '');
+        $channel = trim((string)($input['channel'] ?? ''));
         // (int) místo bool - PDO by jinak PHP `false` odeslalo jako prázdný
         // string a Postgres to u sloupce typu boolean odmítne.
         $isActive = (int)!empty($input['is_active']);
@@ -98,21 +99,21 @@ switch ($action) {
                 $password = (string)$stmt->fetchColumn();
             }
             $sql = "UPDATE cameras SET name=?, template_id=?, ip_address=?, username=?, password=?,
-                    is_active=?, is_weighing_photo=?, lpr_mode=?, show_on_dashboard=? WHERE id=?";
+                    is_active=?, is_weighing_photo=?, lpr_mode=?, show_on_dashboard=?, channel=? WHERE id=?";
             $pdo->prepare($sql)->execute([
                 $name, $templateId, $ip, $username, $password,
-                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard, $id,
+                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard, $channel, $id,
             ]);
         } else {
             if ($password === '') {
                 respond(['ok' => false, 'error' => 'Heslo je povinné u nové kamery'], 400);
             }
             $sql = "INSERT INTO cameras (name, template_id, ip_address, username, password,
-                    is_active, is_weighing_photo, lpr_mode, show_on_dashboard)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    is_active, is_weighing_photo, lpr_mode, show_on_dashboard, channel)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             $pdo->prepare($sql)->execute([
                 $name, $templateId, $ip, $username, $password,
-                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard,
+                $isActive, $isWeighingPhoto, $lprMode, $showOnDashboard, $channel,
             ]);
         }
 
@@ -179,7 +180,7 @@ switch ($action) {
             respond(['ok' => false, 'error' => 'Chybí id'], 400);
         }
 
-        $stmt = $pdo->prepare("SELECT c.ip_address, c.username, c.password, t.url_template
+        $stmt = $pdo->prepare("SELECT c.ip_address, c.username, c.password, c.channel, t.url_template
                                 FROM cameras c JOIN camera_templates t ON t.id = c.template_id
                                 WHERE c.id = ?");
         $stmt->execute([$id]);
