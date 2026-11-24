@@ -137,7 +137,7 @@ function saveWeight(PDO $pdo, float $weight, bool $isStabilized = true): ?int {
 // jediný záznam o tom, kdo na váze byl.
 function takeStartPhoto(PDO $pdo, array $config): ?array {
     $camera = $pdo->query(
-        "SELECT c.ip_address, c.username, c.password, c.channel, t.url_template
+        "SELECT c.ip_address, c.username, c.password, c.channel, c.substream, t.url_template
          FROM cameras c
          JOIN camera_templates t ON t.id = c.template_id
          WHERE c.is_active = true AND c.is_weighing_photo = true
@@ -212,7 +212,7 @@ function insertWeighingReading(PDO $pdo, int $weighingId, float $weight, bool $i
 
 // ----- Foto + SPZ pro všechny aktivní kamery určené k fotografování při vážení -----
 function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
-    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.channel, c.is_weighing_photo, c.lpr_mode, t.url_template
+    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.channel, c.substream, c.is_weighing_photo, c.lpr_mode, t.url_template
             FROM cameras c
             JOIN camera_templates t ON t.id = c.template_id
             WHERE c.is_active = true AND (c.is_weighing_photo = true OR c.lpr_mode != 'off')

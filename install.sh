@@ -502,7 +502,10 @@ CREATE TABLE IF NOT EXISTS cameras (
     -- Číslo kanálu u kamer visících za NVR (víc kamer sdílí jednu IP, liší
     -- se jen číslem kanálu v RTSP URL) - viz {channel} v šabloně, prázdné
     -- pro kamery připojené přímo bez NVR.
-    channel VARCHAR(10) NOT NULL DEFAULT ''
+    channel VARCHAR(10) NOT NULL DEFAULT '',
+    -- Volba hlavní proud/substream (číslování a význam záleží na výrobci
+    -- NVR, proto volný text, ne pevná volba) - viz {substream} v šabloně.
+    substream VARCHAR(10) NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS weighings (

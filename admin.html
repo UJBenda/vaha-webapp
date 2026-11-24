@@ -192,6 +192,10 @@
                             <input type="text" id="camera-channel" placeholder="např. 6 - prázdné = kamera bez NVR">
                         </div>
                         <div>
+                            <label for="camera-substream">Proud (hlavní/substream, záleží na NVR)</label>
+                            <input type="text" id="camera-substream" placeholder="např. 0 = hlavní, 1 = substream u Dahua">
+                        </div>
+                        <div>
                             <label for="camera-username">Uživatel</label>
                             <input type="text" id="camera-username" required>
                         </div>
@@ -324,10 +328,12 @@
                 synchronizaci nahradí hodnotami z konkrétní kamery, např.
                 <code>rtsp://{username}:{password}@{ip_address}/stream1</code>.
                 Pro kamery za NVR (víc kamer sdílí jednu IP, liší se jen číslem
-                kanálu) použij navíc <code>{channel}</code> - číslo kanálu se
-                vyplňuje u konkrétní kamery, např. pro Dahua NVR:
-                <code>rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&amp;subtype=0</code>
-                (<code>subtype=0</code> hlavní proud, <code>subtype=1</code> substream).
+                kanálu) použij navíc <code>{channel}</code>, a pro volbu hlavní
+                proud/substream <code>{substream}</code> - obojí se vyplňuje u
+                konkrétní kamery, např. pro Dahua NVR:
+                <code>rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&amp;subtype={substream}</code>
+                (u Dahua <code>subtype=0</code> hlavní proud, <code>subtype=1</code> substream -
+                číslování se ale může lišit podle výrobce NVR).
             </p>
             <table id="templates-table">
                 <thead>
@@ -620,6 +626,7 @@
             document.getElementById('camera-template').value = c ? c.template_id : (templatesCache[0] ? templatesCache[0].id : '');
             document.getElementById('camera-ip').value = c ? c.ip_address : '';
             document.getElementById('camera-channel').value = c ? (c.channel || '') : '';
+            document.getElementById('camera-substream').value = c ? (c.substream || '') : '';
             document.getElementById('camera-username').value = c ? c.username : '';
             document.getElementById('camera-password').value = '';
             document.getElementById('camera-password-hint').textContent = c
@@ -644,6 +651,7 @@
                 template_id: document.getElementById('camera-template').value,
                 ip_address: document.getElementById('camera-ip').value,
                 channel: document.getElementById('camera-channel').value,
+                substream: document.getElementById('camera-substream').value,
                 username: document.getElementById('camera-username').value,
                 password: document.getElementById('camera-password').value,
                 is_active: document.getElementById('camera-active').checked,

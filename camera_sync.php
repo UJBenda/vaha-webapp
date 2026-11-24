@@ -16,10 +16,13 @@
 //   rtsp://{user}:{pass}@{ip}/stream1
 //
 // {channel} je pro kamery visící za NVR (víc kamer sdílí jednu IP NVR,
-// liší se jen číslem kanálu v cestě), např. u Dahua NVR:
-//   rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&subtype=0
-// (subtype=0 hlavní proud, subtype=1 substream). U kamer bez NVR se
-// {channel} v šabloně nepoužije a pole zůstává v DB prázdné.
+// liší se jen číslem kanálu v cestě). {substream} je volba hlavní
+// proud/substream - typicky "0"/"1", ale přesný význam a číslování závisí
+// na výrobci NVR, proto je to volné textové pole, ne pevná volba. Např. u
+// Dahua NVR (subtype 0 = hlavní proud, 1 = substream):
+//   rtsp://{username}:{password}@{ip_address}:554/cam/realmonitor?channel={channel}&subtype={substream}
+// U kamer bez NVR, nebo bez volby streamu, zůstávají pole v DB prázdná a
+// placeholdery se v šabloně jednoduše nepoužijí.
 
 function mediamtxPathName(int $cameraId): string {
     return 'cam' . $cameraId;
@@ -27,8 +30,12 @@ function mediamtxPathName(int $cameraId): string {
 
 function resolveCameraSource(array $camera): string {
     return str_replace(
-        ['{ip_address}', '{username}', '{password}', '{ip}', '{user}', '{pass}', '{channel}'],
-        [$camera['ip_address'], $camera['username'], $camera['password'], $camera['ip_address'], $camera['username'], $camera['password'], $camera['channel'] ?? ''],
+        ['{ip_address}', '{username}', '{password}', '{ip}', '{user}', '{pass}', '{channel}', '{substream}'],
+        [
+            $camera['ip_address'], $camera['username'], $camera['password'],
+            $camera['ip_address'], $camera['username'], $camera['password'],
+            $camera['channel'] ?? '', $camera['substream'] ?? '',
+        ],
         $camera['url_template']
     );
 }
@@ -36,7 +43,7 @@ function resolveCameraSource(array $camera): string {
 function syncCameras(PDO $pdo): array {
     $log = [];
 
-    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.channel, t.url_template
+    $sql = "SELECT c.id, c.name, c.ip_address, c.username, c.password, c.channel, c.substream, t.url_template
             FROM cameras c
             JOIN camera_templates t ON t.id = c.template_id
             WHERE c.is_active = true";
