@@ -287,6 +287,7 @@
                             <select id="scale-protocol" required>
                                 <option value="generic_csv">Obecný (dotaz "MSV?;", CSV odpověď)</option>
                                 <option value="it1_the">SysTec IT1 - Online mode (RN/RM)</option>
+                                <option value="it1_continuous">SysTec IT1 - Continuous output (SysTec protokol)</option>
                             </select>
                         </div>
                         <div>
@@ -718,6 +719,7 @@
         const SCALE_PROTOCOL_LABELS = {
             generic_csv: 'Obecný (MSV?)',
             it1_the: 'SysTec IT1 (RN/RM)',
+            it1_continuous: 'SysTec IT1 (continuous output)',
         };
 
         async function loadScales() {

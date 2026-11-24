@@ -274,7 +274,14 @@ function captureWeighingPhotos(PDO $pdo, int $weighingId, array $config): void {
 //   byte 1-2 = chybový kód ("00" = OK), byte 23-30 = hrubá váha (gross) -
 //   appka netáruje, celé vozidlo stojí na můstku od prázdného po naložený
 //   stav, takže "váha" appky odpovídá hrubé váze terminálu.
-const SCALE_PROTOCOLS = ['generic_csv', 'it1_the'];
+//
+// 'it1_continuous': SysTec IT1 - "Continuous Output", "SysTec Protocol"
+//   (Technical Manual IT1 Rev. 3, kap. 20.1). Terminál sám bez vyzvání
+//   průběžně posílá 15znakový řetězec (+CR LF): byte 1 = 'S' (vždy), byte 2
+//   = stav (mezera = ustáleno, 'D' = v pohybu), byte 3-12 = váha (10 znaků),
+//   byte 13 = mezera, byte 14-15 = jednotka. Appka nic neposílá (terminál na
+//   vstup v tomhle režimu nereaguje) a jen přečte další řádek ze streamu.
+const SCALE_PROTOCOLS = ['generic_csv', 'it1_the', 'it1_continuous'];
 
 const IT1_THE_ERROR_CODES = [
     '00' => 'OK',
@@ -290,6 +297,10 @@ const IT1_THE_ERROR_CODES = [
 function buildScaleCommand(string $protocol): string {
     if ($protocol === 'it1_the') {
         return '<RM1>';
+    }
+    if ($protocol === 'it1_continuous') {
+        // Continuous output - terminál posílá data sám, bez dotazu.
+        return '';
     }
     return "MSV?;\r\n";
 }
@@ -326,6 +337,30 @@ function parseIT1TheResponse(string $response, ?string &$errorMessage = null): ?
     return (float)$gross;
 }
 
+function parseIT1ContinuousResponse(string $response, ?string &$errorMessage = null): ?float {
+    $content = rtrim($response, "\r\n");
+
+    // Minimálně start znak 'S' + stav + 10znaková váha (byte 13 mezera a
+    // jednotka nejsou pro parsování potřeba, ale bez nich by to nebyla
+    // platná odpověď podle kap. 20.1).
+    if (strlen($content) < 12) {
+        $errorMessage = 'Odpověď je příliš krátká pro SysTec continuous output formát (očekává se min. 12 znaků, viz Technical Manual IT1 kap. 20.1)';
+        return null;
+    }
+    if ($content[0] !== 'S') {
+        $errorMessage = "Odpověď nezačíná znakem 'S' - neodpovídá formátu SysTec continuous output: '$content'";
+        return null;
+    }
+
+    $weight = str_replace(',', '.', trim(substr($content, 2, 10)));
+    if ($weight === '' || !is_numeric($weight)) {
+        $errorMessage = "Pole váhy se nepodařilo rozparsovat jako číslo: '$weight'";
+        return null;
+    }
+
+    return (float)$weight;
+}
+
 function parseGenericCsvResponse(string $response, ?string &$errorMessage = null): ?float {
     $parts = explode(',', trim($response));
     if (isset($parts[0]) && is_numeric(trim($parts[0]))) {
@@ -338,6 +373,9 @@ function parseGenericCsvResponse(string $response, ?string &$errorMessage = null
 function parseScaleResponse(string $protocol, string $response, ?string &$errorMessage = null): ?float {
     if ($protocol === 'it1_the') {
         return parseIT1TheResponse($response, $errorMessage);
+    }
+    if ($protocol === 'it1_continuous') {
+        return parseIT1ContinuousResponse($response, $errorMessage);
     }
     return parseGenericCsvResponse($response, $errorMessage);
 }
