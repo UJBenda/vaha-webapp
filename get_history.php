@@ -1,15 +1,10 @@
 <?php
-// ----- NASTAVENÍ -----
-$db_host = 'localhost';
-$db_port = '5432'; 
-$db_name = 'vaha';
-$db_user = 'vaha'; 
-$db_pass = 'eJzZX5nuc@9RqUXSX';
-// ---------------------
+$config = require __DIR__ . '/config.php';
 
 try {
-    $dsn = "pgsql:host=$db_host;port=$db_port;dbname=$db_name";
-    $pdo = new PDO($dsn, $db_user, $db_pass);
+    $db = $config['db'];
+    $dsn = "pgsql:host={$db['host']};port={$db['port']};dbname={$db['name']}";
+    $pdo = new PDO($dsn, $db['user'], $db['pass']);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Základní dotaz
