@@ -199,6 +199,38 @@
         }
         #driver-save-status.ok { color: #0ca30c; }
         #driver-save-status.error { color: #d93025; }
+        #zero-scale-button {
+            padding: 10px 16px;
+            background: #fff;
+            color: #3c4043;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #zero-scale-button:hover { background: #f1f3f4; }
+        #zero-scale-button:disabled { color: #9aa0a6; cursor: default; }
+        #zero-scale-spinner {
+            display: none;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(60,64,67,0.3);
+            border-top-color: #3c4043;
+            border-radius: 50%;
+            animation: driver-save-spin 0.8s linear infinite;
+        }
+        #zero-scale-button:disabled #zero-scale-spinner { display: inline-block; }
+        #zero-scale-status {
+            font-size: 0.85rem;
+            margin-top: 6px;
+            min-height: 1.2em;
+        }
+        #zero-scale-status.ok { color: #0ca30c; }
+        #zero-scale-status.error { color: #d93025; }
         #history-table {
             width: 100%;
             border-collapse: collapse;
@@ -271,15 +303,22 @@
         <div class="weighing">
             <div class="section-header">
                 <h2>Aktuální váha</h2>
-                <button id="driver-save-button">
-                    <span id="driver-save-spinner"></span>
-                    <span id="driver-save-label">Vážení řidič</span>
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button id="zero-scale-button" title="Jen pro prázdnou plošinu">
+                        <span id="zero-scale-spinner"></span>
+                        <span id="zero-scale-label">Vynulovat váhu</span>
+                    </button>
+                    <button id="driver-save-button">
+                        <span id="driver-save-spinner"></span>
+                        <span id="driver-save-label">Vážení řidič</span>
+                    </button>
+                </div>
             </div>
             <div id="live-weight-display">
                 --.-- <small>kg</small>
             </div>
             <div id="driver-save-status"></div>
+            <div id="zero-scale-status"></div>
 
             <h2>Historie vážení</h2>
             
@@ -587,6 +626,40 @@
                     driverSaveStatus.textContent = '';
                     driverSaveStatus.className = '';
                 }, 4000);
+            }
+        });
+
+        // Tlačítko "Vynulovat váhu" (Set Zero) - viz zero_scale.php. Server
+        // odmítne, pokud na plošině něco je (bezpečnostní pojistka), appka
+        // tu samou kontrolu navíc dělá předem v potvrzovacím dialogu.
+        const zeroScaleButton = document.getElementById('zero-scale-button');
+        const zeroScaleStatus = document.getElementById('zero-scale-status');
+
+        zeroScaleButton.addEventListener('click', async () => {
+            if (!confirm('Opravdu vynulovat váhu (Set Zero)? Ujisti se, že je plošina úplně prázdná - jinak se nastaví špatná nula.')) {
+                return;
+            }
+            zeroScaleButton.disabled = true;
+            zeroScaleStatus.textContent = 'Nuluji... (může trvat pár vteřin)';
+            zeroScaleStatus.className = '';
+            try {
+                const response = await fetch('zero_scale.php', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'Chyba serveru');
+                }
+                zeroScaleStatus.textContent = '✓ Váha vynulována';
+                zeroScaleStatus.className = 'ok';
+            } catch (error) {
+                console.error('Chyba při vynulování váhy:', error);
+                zeroScaleStatus.textContent = '✗ ' + error.message;
+                zeroScaleStatus.className = 'error';
+            } finally {
+                zeroScaleButton.disabled = false;
+                setTimeout(() => {
+                    zeroScaleStatus.textContent = '';
+                    zeroScaleStatus.className = '';
+                }, 6000);
             }
         });
 

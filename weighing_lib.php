@@ -444,6 +444,56 @@ function sendZeroCommand($socket, string $protocol, ?string &$rawOut = null, ?st
     return parseZeroResponse($rawOut, $errorMessage);
 }
 
+// Vyřídí požadavek na vynulování z webové vrstvy (admin_api.php i
+// zero_scale.php na dashboardu) - appka se k váze sama nepřipojuje (druhé
+// souběžné TCP spojení by u leckterého převodníku kolidovalo s tím, co drží
+// weighing_daemon.php), místo toho založí příznak, který démon vyzvedne při
+// svém příštím cyklu na SVÉM spojení, a čeká (až 10s) na výsledek. Než se
+// o to vůbec pokusí, ověří, že je plošina prázdná - vynulování s nákladem
+// na váze by nastavilo špatnou nulu.
+function requestZeroScale(PDO $pdo, array $config): array {
+    $scale = $pdo->query('SELECT protocol FROM scales WHERE active = true LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+    if (!$scale) {
+        return ['ok' => false, 'error' => 'Není nastavena žádná aktivní váha'];
+    }
+    if (buildZeroCommand($scale['protocol']) === null) {
+        return ['ok' => false, 'error' => 'Aktivní protokol vynulování na dálku nepodporuje'];
+    }
+
+    $settings = loadSettings($pdo, ['departure_empty_kg' => 50]);
+    $currentWeight = getCurrentWeight($config);
+    if ($currentWeight !== null && abs($currentWeight) > $settings['departure_empty_kg']) {
+        return [
+            'ok' => false,
+            'error' => "Plošina není prázdná (aktuálně {$currentWeight} kg) - vynulování odmítnuto, aby se nenastavila špatná nula.",
+        ];
+    }
+
+    $token = bin2hex(random_bytes(8));
+    @unlink($config['zero_result_file']);
+    file_put_contents($config['zero_request_flag'], $token);
+
+    $deadline = microtime(true) + 10;
+    while (microtime(true) < $deadline) {
+        usleep(300000);
+        $raw = @file_get_contents($config['zero_result_file']);
+        if ($raw === false) {
+            continue;
+        }
+        $result = json_decode($raw, true);
+        if (is_array($result) && ($result['token'] ?? null) === $token) {
+            return [
+                'ok' => (bool)($result['ok'] ?? false),
+                'raw' => $result['raw'] ?? null,
+                'error' => $result['error'] ?? null,
+            ];
+        }
+    }
+
+    @unlink($config['zero_request_flag']);
+    return ['ok' => false, 'error' => 'Váha neodpověděla do 10 s - běží weighing_daemon.php a má navázané spojení s váhou?'];
+}
+
 // ----- Aktivně vybraná váha (Administrace > Váhy) -----
 // weighing_daemon.php sleduje vždy jen jednu váhu - tu s active = true.
 // Pokud žádná není nastavená (čistá instalace, admin ještě nic nepřidal),

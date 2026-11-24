@@ -341,44 +341,11 @@ switch ($action) {
         respond(['ok' => $weight !== null, 'raw' => $raw, 'weight' => $weight, 'error' => $errorMessage]);
     }
 
-    // Vynulování aktivní váhy (Set Zero) - appka sama se k váze nepřipojuje
-    // (to by u leckterého převodníku kolidovalo s jediným spojením, co drží
-    // weighing_daemon.php), místo toho založí příznak, který démon vyzvedne
-    // při svém příštím cyklu na SVÉM spojení a výsledek zapíše zpátky -
-    // stejný vzor jako force_save_flag, jen obousměrně (viz weighing_lib.php
-    // sendZeroCommand()).
+    // Vynulování aktivní váhy (Set Zero) - viz requestZeroScale() ve
+    // weighing_lib.php (sdíleno se zero_scale.php na dashboardu).
     case 'zero_scale': {
-        $scale = $pdo->query('SELECT protocol FROM scales WHERE active = true LIMIT 1')->fetch(PDO::FETCH_ASSOC);
-        if (!$scale) {
-            respond(['ok' => false, 'error' => 'Není nastavena žádná aktivní váha'], 400);
-        }
-        if (buildZeroCommand($scale['protocol']) === null) {
-            respond(['ok' => false, 'error' => 'Aktivní protokol vynulování na dálku nepodporuje'], 400);
-        }
-
-        $token = bin2hex(random_bytes(8));
-        @unlink($config['zero_result_file']);
-        file_put_contents($config['zero_request_flag'], $token);
-
-        $deadline = microtime(true) + 10;
-        while (microtime(true) < $deadline) {
-            usleep(300000);
-            $raw = @file_get_contents($config['zero_result_file']);
-            if ($raw === false) {
-                continue;
-            }
-            $result = json_decode($raw, true);
-            if (is_array($result) && ($result['token'] ?? null) === $token) {
-                respond([
-                    'ok' => (bool)($result['ok'] ?? false),
-                    'raw' => $result['raw'] ?? null,
-                    'error' => $result['error'] ?? null,
-                ]);
-            }
-        }
-
-        @unlink($config['zero_request_flag']);
-        respond(['ok' => false, 'error' => 'Váha neodpověděla do 10 s - běží weighing_daemon.php a má navázané spojení s váhou?'], 504);
+        $result = requestZeroScale($pdo, $config);
+        respond($result, $result['ok'] ? 200 : 400);
     }
 
     default:
